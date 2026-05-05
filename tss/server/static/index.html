@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>tss · samsara</title>
+  <link rel="icon" href="/static/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <img src="/static/img/samsara-wordmark.png" alt="Samsara" class="logo">
+    </div>
+    <div class="topbar-center">
+      <h1>test scheduling service</h1>
+      <p class="subtitle">HIL testbed fleet · live status</p>
+    </div>
+    <div class="topbar-right">
+      <div class="stat" data-stat="idle">
+        <span class="stat-dot dot-idle"></span>
+        <span class="stat-label">idle</span>
+        <span class="stat-value" id="stat-idle">0</span>
+      </div>
+      <div class="stat" data-stat="busy">
+        <span class="stat-dot dot-busy"></span>
+        <span class="stat-label">busy</span>
+        <span class="stat-value" id="stat-busy">0</span>
+      </div>
+      <div class="stat" data-stat="offline">
+        <span class="stat-dot dot-offline"></span>
+        <span class="stat-label">offline</span>
+        <span class="stat-value" id="stat-offline">0</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat">
+        <span class="stat-label">queue</span>
+        <span class="stat-value" id="stat-queue">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">running</span>
+        <span class="stat-value" id="stat-running">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">done</span>
+        <span class="stat-value" id="stat-completed">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">failed</span>
+        <span class="stat-value stat-failed" id="stat-failed">0</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel panel-agents">
+      <header class="panel-header">
+        <h2>agents</h2>
+        <span class="panel-meta" id="agents-meta">0 testbeds</span>
+      </header>
+      <div id="agent-grid" class="agent-grid">
+        <div class="empty-state">
+          <img src="/static/img/owl-192.png" alt="" class="empty-mark">
+          <p>No testbeds registered yet.</p>
+          <p class="empty-hint">Run <code>tss agent --name vg-01 --caps vehicle_gateway</code></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel panel-queue">
+      <header class="panel-header">
+        <h2>queue</h2>
+        <span class="panel-meta" id="queue-meta">0 jobs</span>
+      </header>
+      <div id="queue-list" class="queue-list">
+        <div class="empty-state-small">queue is empty</div>
+      </div>
+
+      <header class="panel-header panel-header-secondary">
+        <h2>running</h2>
+      </header>
+      <div id="running-list" class="queue-list">
+        <div class="empty-state-small">no jobs running</div>
+      </div>
+    </section>
+
+    <section class="panel panel-events">
+      <header class="panel-header">
+        <h2>events</h2>
+        <span class="panel-meta">recent activity</span>
+      </header>
+      <ul id="events-list" class="events-list">
+        <li class="empty-state-small">waiting for events…</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>samsara · test scheduling service · proof-of-concept</span>
+    <span id="poll-status" class="poll-status">connecting…</span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
