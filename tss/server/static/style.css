@@ -571,3 +571,23 @@ body {
   font-size: .85rem;
   color: var(--samsara-slate);
 }
+
+/* ----- Mine filter ----- */
+
+.filter-bar {
+  display: flex;
+  gap: 1rem;
+  padding: .4rem 1rem;
+  align-items: center;
+  font-size: .85rem;
+  color: var(--samsara-slate);
+  border-bottom: 1px solid var(--samsara-fog);
+}
+.mine-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  cursor: pointer;
+  user-select: none;
+}
+.mine-toggle input { cursor: pointer; }

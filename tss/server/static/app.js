@@ -62,7 +62,29 @@
         if (name !== null) saveSubmitter(name.trim());
       });
     }
+    const mineToggle = document.getElementById("mine-toggle");
+    if (mineToggle) {
+      mineToggle.checked = !!loadSubmitter();
+      mineToggle.addEventListener("change", () => {
+        if (window.__lastFleetData) {
+          renderJobs(window.__lastFleetData.queue, window.__lastFleetData.running_jobs);
+        }
+      });
+    }
   });
+
+  // ---- Mine filter ----
+  function isMineOn() {
+    const t = document.getElementById("mine-toggle");
+    return t ? t.checked : false;
+  }
+
+  function applySubmitterFilter(jobs) {
+    if (!isMineOn()) return jobs;
+    const mine = loadSubmitter();
+    if (!mine) return jobs;
+    return jobs.filter((j) => j.submitter === mine);
+  }
 
   const POLL_INTERVAL_MS = 1000;
   const els = {
@@ -105,6 +127,7 @@
   }
 
   function render(data) {
+    window.__lastFleetData = data;
     renderStats(data.stats);
     renderAgents(data.agents);
     renderJobs(data.queue, data.running_jobs);
@@ -215,8 +238,8 @@
   }
 
   function renderJobs(queue, running) {
-    renderJobList(els.queueList, queue, "queue is empty");
-    renderJobList(els.runningList, running, "no jobs running");
+    renderJobList(els.queueList, applySubmitterFilter(queue), "queue is empty");
+    renderJobList(els.runningList, applySubmitterFilter(running), "no jobs running");
   }
 
   function renderJobList(container, jobs, emptyMsg) {
