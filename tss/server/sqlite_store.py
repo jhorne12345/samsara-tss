@@ -111,7 +111,7 @@ class SQLiteJobStore:
             attempt_count=row["attempt_count"],
             max_attempts=row["max_attempts"],
             submitter=row["submitter"],
-            created_at=self._parse_iso(row["created_at"]),  # type: ignore[arg-type]
+            created_at=self._parse_iso(row["created_at"]),
             started_at=self._parse_iso(row["started_at"]),
             completed_at=self._parse_iso(row["completed_at"]),
             history=events,
@@ -206,7 +206,7 @@ class SQLiteJobStore:
         for row in cursor.fetchall():
             events.append(
                 JobEvent(
-                    at=self._parse_iso(row["at"]),  # type: ignore[arg-type]
+                    at=self._parse_iso(row["at"]),
                     kind=row["kind"],
                     agent_id=UUID(row["agent_id"]) if row["agent_id"] else None,
                     agent_name=row["agent_name"],
