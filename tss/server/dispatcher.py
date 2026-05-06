@@ -51,6 +51,7 @@ from tss.server.errors import (
     UnknownJobError,
 )
 from tss.server.registry import AgentRegistry, InMemoryAgentRegistry
+from tss.server.sqlite_store import SQLiteJobStore
 from tss.server.store import InMemoryJobStore, JobStore
 
 log = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ class Dispatcher:
         default_max_attempts: int = JOB_MAX_ATTEMPTS,
     ) -> None:
         self.registry: AgentRegistry = registry or InMemoryAgentRegistry()
-        self.store: JobStore = store if store is not None else InMemoryJobStore()
+        self.store: JobStore = store if store is not None else SQLiteJobStore(":memory:")
         self.heartbeat_timeout_s = heartbeat_timeout_s
         self.heartbeat_interval_s = heartbeat_interval_s
         self.poll_interval_s = poll_interval_s
@@ -338,6 +339,7 @@ class Dispatcher:
                 detail=f"epoch={epoch} reason={reason}",
             )
         )
+        self.store.update(job)
         log.warning(
             "stale result rejected job=%s agent=%s epoch=%d reason=%s",
             job.id,

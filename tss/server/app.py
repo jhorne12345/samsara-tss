@@ -8,6 +8,7 @@ tests can inject custom instances without monkey-patching.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,6 +20,7 @@ from tss.server.dispatcher import Dispatcher
 from tss.server.routes import agents as agents_routes
 from tss.server.routes import fleet as fleet_routes
 from tss.server.routes import jobs as jobs_routes
+from tss.server.sqlite_store import SQLiteJobStore
 from tss.server.watchdog import Watchdog
 
 log = logging.getLogger(__name__)
@@ -30,10 +32,14 @@ def create_app(
     *,
     dispatcher: Dispatcher | None = None,
     start_watchdog: bool = True,
+    db_path: str | None = None,
 ) -> FastAPI:
     """Build a FastAPI app. Pass ``start_watchdog=False`` in tests where you
     want full control over watchdog ticks."""
-    disp = dispatcher or Dispatcher()
+    if dispatcher is None:
+        path = db_path or os.environ.get("TSS_DB_PATH", "./tss.db")
+        dispatcher = Dispatcher(store=SQLiteJobStore(path))
+    disp = dispatcher
     watchdog = Watchdog(disp)
 
     @asynccontextmanager

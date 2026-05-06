@@ -52,13 +52,16 @@ def _setup_logging(verbose: bool = False) -> None:
 def serve(
     host: Annotated[str, typer.Option(help="Bind address.")] = DEFAULT_HOST,
     port: Annotated[int, typer.Option(help="Port to listen on.")] = DEFAULT_PORT,
+    db_path: Annotated[str, typer.Option("--db-path", help="SQLite path. ':memory:' for ephemeral.")] = "./tss.db",
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
     """Start the TSS dispatcher (FastAPI + watchdog)."""
     _setup_logging(verbose)
     console.print(f"[bold]Starting TSS dispatcher[/] on [cyan]http://{host}:{port}[/]")
+    from tss.server.app import create_app as _create_app
+    app_instance = _create_app(db_path=db_path)
     uvicorn.run(
-        "tss.server.app:app",
+        app_instance,
         host=host,
         port=port,
         log_level="info" if not verbose else "debug",
