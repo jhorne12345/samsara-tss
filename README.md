@@ -15,88 +15,33 @@ The four pillars from the assessment:
 3. **Resiliency** — A heartbeat watchdog detects testbeds that go silent (≥ 3 missed heartbeats) and re-queues their in-flight jobs to other compatible agents. Late results from a previously-offline agent are rejected via an epoch invariant.
 4. **Visibility** — A live web dashboard at `http://localhost:8080/` plus a Rich-based CLI (`tss agents`, `tss jobs`).
 
-## Architecture
+## Architecture (one-minute version)
+
+Three roles, one box.
 
 ```mermaid
-flowchart TB
-    subgraph operator [" "]
-        CLI["CLI<br/>(operator)"]
-        Dash["Web Dashboard"]
-    end
+flowchart LR
+    Op["Operator<br/>(CLI or browser)"]
+    D["TSS Dispatcher<br/>FastAPI · localhost:8080"]
+    A1["Test Rig 1<br/>vehicle_gateway"]
+    A2["Test Rig 2<br/>asset_gateway"]
+    A3["Test Rig 3<br/>both products"]
 
-    subgraph dispatcher ["TSS Dispatcher (FastAPI · single asyncio.Lock)"]
-        direction LR
-        Reg[("AgentRegistry")]
-        Store[("JobStore")]
-        WD["Watchdog<br/>(reaps stale agents)"]
-    end
-
-    subgraph fleet [" "]
-        A1["Agent vg-01<br/>vehicle_gateway"]
-        A2["Agent ag-01<br/>asset_gateway"]
-        A3["Agent (chaos)<br/>silent death"]
-    end
-
-    CLI -- "POST /api/jobs" --> dispatcher
-    Dash -- "GET /api/fleet/status (1s)" --> dispatcher
-    A1 -- "register · heartbeat · claim · result" --> dispatcher
-    A2 -- "claim job" --> dispatcher
-    A3 -. "missed heartbeat" .-> dispatcher
-
-    classDef agent fill:#b2f2bb,stroke:#22c55e
-    classDef chaos fill:#ffd8a8,stroke:#f59e0b
-    classDef internal fill:#c3fae8,stroke:#0F2944
-    class A1,A2 agent
-    class A3 chaos
-    class Reg,Store,WD internal
+    Op -->|"submit jobs<br/>view dashboard"| D
+    D -.->|"assignments"| A1
+    D -.->|"assignments"| A2
+    D -.->|"assignments"| A3
+    A1 -->|"register · heartbeat<br/>poll · report result"| D
+    A2 --> D
+    A3 --> D
 ```
 
-## Call sequence — three scenarios
+Two things to know up front:
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Op as Operator
-    participant D as Dispatcher
-    participant A as Agent A
-    participant B as Agent B
+- **Rigs poll, the dispatcher doesn't push.** Polling is robust to flaky HIL networks.
+- **One Python process, one queue, one `asyncio.Lock` around all writes.** Per-resource locks would be more code and not measurably faster at this scale.
 
-    rect rgb(245, 248, 252)
-    note over Op,B: 1. Happy path
-    A->>D: POST /register {name, caps}
-    D-->>A: agent_id, epoch=1
-    Op->>D: POST /jobs (J)
-    A->>D: GET /jobs/next
-    D-->>A: assignment {job=J, epoch=1}
-    note over A: runs job (sleep)
-    A->>D: POST .../result {epoch=1, exit=0}
-    D-->>A: 204 (J=COMPLETED)
-    end
-
-    rect rgb(252, 248, 240)
-    note over Op,B: 2. Silent death → reassignment
-    A->>D: claim job J2 (epoch=1)
-    note over A: process killed (silent)
-    note over D: watchdog tick: now - last_hb > 6s<br/>→ A=OFFLINE, J2=QUEUED
-    B->>D: GET /jobs/next
-    D-->>B: J2 (epoch=B's, attempt=2)
-    B->>D: POST result exit=0
-    D-->>B: 204 (COMPLETED)
-    end
-
-    rect rgb(252, 240, 240)
-    note over Op,B: 3. Stale-result rejection (the race)
-    note over A: A's network unblocks
-    A->>D: POST result for J2 (epoch=1, stale)
-    D-->>A: 409 Conflict (logged + dropped)
-    A->>D: POST heartbeat (epoch=1)
-    D-->>A: 410 Gone (must re-register)
-    A->>D: POST /register
-    D-->>A: agent_id, epoch=2
-    end
-```
-
-A live Excalidraw version of both diagrams (with hand-drawn aesthetic) is in `docs/diagrams.md`.
+The full story — tech stack, dispatcher internals, data model, sequence diagrams, job state machine, and where to look first — lives in **[`docs/architecture.md`](docs/architecture.md)**. The hand-drawn Excalidraw renders for the live demo are in `docs/diagrams.md`.
 
 ## Quick start
 

@@ -1,0 +1,304 @@
+# Architecture
+
+This is the deep-dive companion to the README. It explains, in plain English, what's in the codebase and why it's built this way.
+
+If you're reading this to prep for the presentation, the short version: **one Python process, one queue, one lock around all writes, one background loop that reaps dead test rigs.** Everything else is detail.
+
+---
+
+## What the service does, in one sentence
+
+Operators submit firmware test jobs, each tagged with a required product (e.g. `vehicle_gateway`). The dispatcher routes each job to a compatible, alive, idle test rig — and if a rig dies mid-test, the dispatcher detects that and re-runs the job somewhere else.
+
+---
+
+## Tech stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Language | Python 3.11+ | Fastest scaffold, lets time go to chaos demo and tests rather than boilerplate. |
+| Web framework | FastAPI | Async-native, gives free OpenAPI docs at `/docs`, low ceremony. |
+| ASGI server | Uvicorn | Standard pairing with FastAPI. |
+| Data validation | Pydantic v2 | All wire types are typed; validation happens at the HTTP boundary, not in business logic. |
+| Concurrency | `asyncio` (single process) | One event loop, one `asyncio.Lock`. No threads, no multiprocessing. |
+| HTTP client (agents) | `httpx` (async) | Mirrors the server stack so we don't mix sync/async. |
+| CLI | Typer + Rich | Typer for the command tree, Rich for nicely formatted tables (`tss agents`, `tss jobs`). |
+| Dashboard | Plain HTML + CSS + vanilla JS | No build step. Polls `/api/fleet/status` once a second. Lives in `tss/server/static/`. |
+| Storage | In-memory Python objects behind interfaces (`AgentRegistry`, `JobStore`) | Sufficient for the demo; swappable for Postgres + Redis at scale (see `scale-evolution.md`). |
+| Tests | pytest + pytest-asyncio + Hypothesis | The race-condition tests are integration-flavored; Hypothesis is used for property-based fuzzing of the dispatcher state machine. |
+| Linters | ruff (lint + format), mypy --strict | Strict typing required for `tss/`. |
+| Packaging | uv + hatchling | `uv sync --extra dev` for a one-step install. |
+| Demo runner | Make + tmux | `make demo` opens a tmux session with dispatcher + 5 mock rigs + an operator REPL. |
+
+---
+
+## High-level picture
+
+Three roles, talking to one box.
+
+```mermaid
+flowchart LR
+    Op["Operator<br/>(CLI or browser dashboard)"]
+    D["TSS Dispatcher<br/>FastAPI · asyncio<br/>localhost:8080"]
+    A1["Test Rig 1<br/>vehicle_gateway"]
+    A2["Test Rig 2<br/>asset_gateway"]
+    A3["Test Rig 3<br/>both"]
+
+    Op -->|"submit jobs<br/>view dashboard"| D
+    D -.->|"assignments"| A1
+    D -.->|"assignments"| A2
+    D -.->|"assignments"| A3
+    A1 -->|"register · heartbeat<br/>poll · report result"| D
+    A2 -->|"same"| D
+    A3 -->|"same"| D
+```
+
+Two things to notice:
+
+- **The dispatcher does not push work to rigs.** Rigs poll the dispatcher every second asking "any work for me?" Polling is more robust than push to flaky HIL networks.
+- **All communication is HTTP.** No WebSockets, no message queue, no shared filesystem.
+
+---
+
+## Inside the dispatcher
+
+When an HTTP request lands at the dispatcher, this is what happens internally.
+
+```mermaid
+flowchart TB
+    subgraph Process["Dispatcher Process (one OS process, one event loop)"]
+        direction TB
+        Routes["HTTP Routes<br/>/api/agents · /api/jobs · /api/fleet/status"]
+        Disp["Dispatcher<br/>(business logic)"]
+        Lock(["asyncio.Lock<br/>SINGLE WRITER"])
+        Reg[("AgentRegistry<br/>in-memory dict")]
+        Store[("JobStore<br/>in-memory dict")]
+        WD["Watchdog<br/>(1s tick, runs in background)"]
+
+        Routes --> Disp
+        WD --> Disp
+        Disp --> Lock
+        Lock --> Reg
+        Lock --> Store
+    end
+```
+
+The shapes matter:
+
+- **Pill (`Lock`)** — the single point of mutual exclusion. Every state change in the system passes through this gate.
+- **Cylinder (`AgentRegistry`, `JobStore`)** — storage. Today these are Python dicts; tomorrow they're Postgres tables behind the same interface.
+- **Box (`Watchdog`)** — a background loop that wakes up every second and asks the dispatcher to scan for dead rigs and stuck jobs. It does not have its own lock; it borrows the dispatcher's.
+
+**Why one lock?** With ~10 rigs, contention is invisible — the lock is held for microseconds. Per-resource locks introduce ordering bugs (lock A then B vs lock B then A → deadlock) for no measured benefit. If we ever scaled past the point where this matters, we'd swap to Postgres row-level locks, not split this one.
+
+---
+
+## Data model
+
+Three Pydantic models do most of the work. Source: `tss/common/models.py`.
+
+```mermaid
+classDiagram
+    class Agent {
+        UUID id
+        str name
+        list~str~ capabilities
+        AgentStatus status (idle|busy|offline)
+        int epoch
+        float last_heartbeat_mono
+        UUID? current_job_id
+    }
+    class Job {
+        UUID id
+        str product
+        float duration_seconds
+        JobStatus status (queued|running|completed|failed)
+        UUID? assigned_agent_id
+        int? assigned_agent_epoch
+        int attempt_count
+        int max_attempts
+        list~JobEvent~ history
+    }
+    class JobEvent {
+        datetime at
+        JobEventKind kind (submitted|claimed|completed|failed|reassigned|overrun|stale_result_rejected)
+        UUID? agent_id
+        str? detail
+    }
+    Job "1" --> "many" JobEvent : history
+    Job ..> Agent : assigned_agent_id
+```
+
+A few fields earn their keep:
+
+- `Agent.epoch` — incremented every time an agent (re-)registers. The "version number" we stamp on every job claim.
+- `Job.assigned_agent_epoch` — captured at claim time. Used to reject late results from a previous incarnation of the agent.
+- `Job.history` — every transition is appended here as a `JobEvent`. The dashboard's "Recent events" panel is built from this list. Cheap to add; it's the visibility surface for resiliency.
+
+---
+
+## Job lifecycle (state machine)
+
+```mermaid
+stateDiagram-v2
+    [*] --> QUEUED : submit
+    QUEUED --> RUNNING : agent claims
+    RUNNING --> COMPLETED : exit_code matches expected
+    RUNNING --> QUEUED : agent dies or job fails<br/>AND attempts < max_attempts
+    RUNNING --> FAILED : agent dies or job fails<br/>AND attempts == max_attempts
+    RUNNING --> QUEUED : per-job overrun<br/>(elapsed > duration × 3)
+    COMPLETED --> [*]
+    FAILED --> [*]
+```
+
+Three things can move a job out of RUNNING:
+
+1. **Agent reports a result** — success → COMPLETED, failure → QUEUED or FAILED.
+2. **Agent goes silent** — watchdog detects missed heartbeats → job back to QUEUED.
+3. **Job runs too long** — watchdog detects elapsed > 3× declared duration → job back to QUEUED, agent freed even if it was still heartbeating.
+
+The third case is the "stuck-but-alive" failure mode. AI's first draft of the watchdog only handled the first two.
+
+---
+
+## Happy-path sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Op as Operator
+    participant D as Dispatcher
+    participant A as Test Rig
+
+    A->>D: POST /api/agents/register<br/>{name, capabilities}
+    D-->>A: 200 {agent_id, epoch=1, ...}
+    loop every 2 seconds
+        A->>D: POST /api/agents/{id}/heartbeat
+        D-->>A: 204
+    end
+    Op->>D: POST /api/jobs (vehicle_gateway, 8s)
+    D-->>Op: 201 {job_id}
+    A->>D: GET /api/agents/{id}/jobs/next
+    D-->>A: 200 {job_id, duration=8, epoch=1}
+    Note over A: sleeps 8s simulating the test
+    A->>D: POST /api/agents/{id}/jobs/{job_id}/result<br/>{epoch=1, exit_code=0}
+    D-->>A: 204
+```
+
+---
+
+## Failure-path sequence (the one the assessment is graded on)
+
+This is the sequence that makes the epoch invariant earn its keep.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant D as Dispatcher
+    participant A as Rig A
+    participant B as Rig B
+
+    A->>D: claim job J (epoch=1)
+    D-->>A: 200 (J is RUNNING under A@epoch=1)
+    Note over A: process killed silently<br/>(no result sent)
+    Note over D: watchdog tick: A's last heartbeat is 6s old<br/>→ A=OFFLINE, J back to QUEUED, history += "reassigned"
+    B->>D: GET /jobs/next
+    D-->>B: 200 (J, attempt=2, epoch=B's)
+    B->>D: POST result: success
+    D-->>B: 204 (J=COMPLETED)
+    Note over A: A's network unblocks
+    A->>D: POST result for J (epoch=1, success)
+    D-->>A: 409 Conflict (stale epoch)<br/>history += "stale_result_rejected"
+    A->>D: heartbeat (epoch=1)
+    D-->>A: 410 Gone (must re-register)
+    A->>D: POST /register
+    D-->>A: 200 (epoch=2)
+```
+
+Without the epoch check, step 11 would overwrite step 9's correct result with A's stale outcome. With it, A's late result is detected and dropped.
+
+---
+
+## Concurrency model: one lock, one critical section
+
+The single most important rule in this codebase:
+
+> **Every mutation of `AgentRegistry` and `JobStore` happens inside `async with dispatcher._lock:`**
+
+That includes:
+
+| Operation | Method | Why it needs the lock |
+|---|---|---|
+| Register / re-register an agent | `register` | Bumps epoch, replaces agent record. |
+| Heartbeat | `heartbeat` | Writes timestamps; checks epoch. |
+| Submit a job | `submit_job` | Adds to the store. |
+| Claim a job | `claim_next_job` | Find-and-assign must be atomic. |
+| Report a result | `report_result` | Multi-field state machine transition. |
+| Watchdog tick | `reap_stale_agents` | Scans both registry and store, mutates both. |
+| Force-kill (demo button) | `force_kill_agent` | Same as offline + epoch bump. |
+
+The lock is held only for the duration of a state change — microseconds. **Nothing awaits anything other than the lock itself inside a critical section.** This keeps lock-hold time bounded and rules out lock-order inversions.
+
+Two failure modes the lock prevents:
+
+1. **Two agents claiming the same job** — without the lock, both could read `job.status == QUEUED`, both write `RUNNING`, and the dispatcher would believe two rigs are working on the same job. Test: `tests/integration/test_concurrent_claim.py`.
+2. **Watchdog requeues while a result is being reported** — without the lock, the watchdog could re-queue a job at the same instant the agent is reporting completion, leading to duplicated work or lost results.
+
+---
+
+## What the watchdog does, exactly
+
+`tss/server/watchdog.py` is just a loop. The actual work happens in `Dispatcher.reap_stale_agents` (under the lock).
+
+Each tick (default 1 second):
+
+1. For every agent: if `now - last_heartbeat > 6s`, mark it OFFLINE. If it had a job, push that job back to QUEUED and emit a `reassigned` event (or `failed` if attempts are exhausted).
+2. For every RUNNING job: if `elapsed > duration × 3`, push it back to QUEUED (overrun) and free the owning agent.
+
+That's the entire resiliency story.
+
+---
+
+## Project layout
+
+```
+tss/
+├── common/
+│   ├── clock.py        # monotonic() + utcnow() — fakeable in tests
+│   ├── constants.py    # tunables (heartbeat interval, timeout, etc.)
+│   └── models.py       # Pydantic v2 models (Agent, Job, JobEvent, ...)
+├── server/
+│   ├── app.py          # FastAPI app factory, lifespan starts/stops watchdog
+│   ├── dispatcher.py   # *** correctness lives here — one asyncio.Lock ***
+│   ├── watchdog.py     # background loop that calls reap_stale_agents
+│   ├── registry.py     # AgentRegistry interface + InMemory impl
+│   ├── store.py        # JobStore interface + InMemory impl
+│   ├── errors.py       # typed exceptions mapped to HTTP status codes
+│   ├── routes/         # HTTP routes — thin shells over the dispatcher
+│   │   ├── agents.py
+│   │   ├── jobs.py
+│   │   └── fleet.py
+│   └── static/         # dashboard HTML/CSS/JS
+├── agent/
+│   ├── runner.py       # mock agent — register, heartbeat, poll, report
+│   └── chaos.py        # failure profiles for the chaos demo
+└── cli.py              # Typer CLI: serve, agent, chaos, submit-job, agents, jobs
+
+tests/
+├── unit/               # dispatcher, registry, store, chaos profile sampling
+└── integration/        # full HTTP flow + the three race tests + chaos
+```
+
+---
+
+## Where to look first if you're new to the codebase
+
+In this order:
+
+1. `tss/common/models.py` — the data shapes. 5 minutes.
+2. `tss/server/dispatcher.py` — the brain. All logic, all locking. 20 minutes.
+3. `tests/integration/test_stale_agent.py` — the headline race test. Reading this teaches you the epoch invariant faster than any prose. 5 minutes.
+4. `tss/server/watchdog.py` — 60 lines, mostly cancellation handling.
+5. `tss/agent/runner.py` — what a mock test rig actually does.
+
+Skip the routes, the dashboard JS, and the CLI on a first pass. They're scaffolding.

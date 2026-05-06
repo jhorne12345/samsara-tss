@@ -1,6 +1,6 @@
 # Diagrams
 
-The README contains Mermaid versions of these diagrams that render natively on GitHub. This file holds the alternate Excalidraw renders (hand-drawn aesthetic) used during the live presentation, plus notes on what each one is showing.
+The Mermaid versions that render natively on GitHub live in **[`architecture.md`](architecture.md)** (the deep dive) and the README (the one-minute version). This file holds the alternate Excalidraw renders (hand-drawn aesthetic) used during the live presentation, plus notes on what each one is showing.
 
 ## System diagram
 
