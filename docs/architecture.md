@@ -24,7 +24,7 @@ Operators submit firmware test jobs, each tagged with a required product (e.g. `
 | HTTP client (agents) | `httpx` (async) | Mirrors the server stack so we don't mix sync/async. |
 | CLI | Typer + Rich | Typer for the command tree, Rich for nicely formatted tables (`tss agents`, `tss jobs`). |
 | Dashboard | Plain HTML + CSS + vanilla JS | No build step. Polls `/api/fleet/status` once a second. Lives in `tss/server/static/`. |
-| Storage | In-memory Python objects behind interfaces (`AgentRegistry`, `JobStore`) | Sufficient for the demo; swappable for Postgres + Redis at scale (see `scale-evolution.md`). |
+| Storage | SQLite (stdlib `sqlite3`, WAL mode) via `SQLiteJobStore`; `InMemoryAgentRegistry` for agents | Jobs and their full event history survive restarts. `:memory:` mode in tests for zero I/O overhead. Swappable for Postgres at scale via the `JobStore` Protocol. |
 | Tests | pytest + pytest-asyncio + Hypothesis | The race-condition tests are integration-flavored; Hypothesis is used for property-based fuzzing of the dispatcher state machine. |
 | Linters | ruff (lint + format), mypy --strict | Strict typing required for `tss/`. |
 | Packaging | uv + hatchling | `uv sync --extra dev` for a one-step install. |
@@ -72,7 +72,7 @@ flowchart TB
         Disp["Dispatcher<br/>(business logic)"]
         Lock(["asyncio.Lock<br/>SINGLE WRITER"])
         Reg[("AgentRegistry<br/>in-memory dict")]
-        Store[("JobStore<br/>in-memory dict")]
+        Store[("SQLiteJobStore<br/>tss.db · WAL")]
         WD["Watchdog<br/>(1s tick, runs in background)"]
 
         Routes --> Disp
@@ -86,7 +86,7 @@ flowchart TB
 The shapes matter:
 
 - **Pill (`Lock`)** — the single point of mutual exclusion. Every state change in the system passes through this gate.
-- **Cylinder (`AgentRegistry`, `JobStore`)** — storage. Today these are Python dicts; tomorrow they're Postgres tables behind the same interface.
+- **Cylinder (`AgentRegistry`, `SQLiteJobStore`)** — storage. The job store is SQLite-backed today; tomorrow it's Postgres behind the same `JobStore` Protocol.
 - **Box (`Watchdog`)** — a background loop that wakes up every second and asks the dispatcher to scan for dead rigs and stuck jobs. It does not have its own lock; it borrows the dispatcher's.
 
 **Why one lock?** With ~10 rigs, contention is invisible — the lock is held for microseconds. Per-resource locks introduce ordering bugs (lock A then B vs lock B then A → deadlock) for no measured benefit. If we ever scaled past the point where this matters, we'd swap to Postgres row-level locks, not split this one.
@@ -111,6 +111,7 @@ classDiagram
     class Job {
         UUID id
         str product
+        str submitter
         float duration_seconds
         JobStatus status (queued|running|completed|failed)
         UUID? assigned_agent_id
@@ -272,21 +273,24 @@ tss/
 │   ├── dispatcher.py   # *** correctness lives here — one asyncio.Lock ***
 │   ├── watchdog.py     # background loop that calls reap_stale_agents
 │   ├── registry.py     # AgentRegistry interface + InMemory impl
-│   ├── store.py        # JobStore interface + InMemory impl
+│   ├── store.py        # JobStore Protocol (interface only)
+│   ├── sqlite_store.py # SQLiteJobStore — canonical impl (stdlib sqlite3, WAL)
 │   ├── errors.py       # typed exceptions mapped to HTTP status codes
 │   ├── routes/         # HTTP routes — thin shells over the dispatcher
 │   │   ├── agents.py
-│   │   ├── jobs.py
-│   │   └── fleet.py
+│   │   ├── jobs.py     # includes GET /api/jobs/{id} and ?submitter= filter
+│   │   ├── fleet.py
+│   │   └── metrics.py  # /metrics — Prometheus text format, zero deps
 │   └── static/         # dashboard HTML/CSS/JS
 ├── agent/
 │   ├── runner.py       # mock agent — register, heartbeat, poll, report
 │   └── chaos.py        # failure profiles for the chaos demo
-└── cli.py              # Typer CLI: serve, agent, chaos, submit-job, agents, jobs
+└── cli.py              # Typer CLI: serve (--db-path), agent, chaos, submit-job (--submitter), agents, jobs
 
 tests/
-├── unit/               # dispatcher, registry, store, chaos profile sampling
-└── integration/        # full HTTP flow + the three race tests + chaos
+├── unit/               # dispatcher, registry, sqlite_store, chaos profile sampling
+└── integration/        # full HTTP flow + race tests + submitter filter +
+                        #   job detail + metrics + chaos
 ```
 
 ---

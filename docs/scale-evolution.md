@@ -11,7 +11,7 @@ The four pillars and the agent-side contract:
 - Capability-aware atomic claim.
 - Epoch-based stale-result rejection.
 
-The clean `JobStore` / `AgentRegistry` interfaces in `tss/server/` are the seam where in-memory becomes distributed. No agent code changes.
+The clean `JobStore` / `AgentRegistry` interfaces in `tss/server/` are the seam where local becomes distributed. No agent code changes.
 
 ## What changes
 
@@ -20,8 +20,8 @@ The clean `JobStore` / `AgentRegistry` interfaces in `tss/server/` are the seam 
 | Today | At 1,000 agents |
 |---|---|
 | `InMemoryAgentRegistry` (Python dict) | Redis hash, TTL on `last_heartbeat_mono`. Heartbeat = `EXPIRE`, watchdog = `KEYS` + `TTL` checks. |
-| `InMemoryJobStore` (Python dict) | Postgres table `jobs(id PK, product, status, assigned_agent_id, assigned_agent_epoch, attempt_count, ...)`. The atomic claim becomes `UPDATE ... WHERE status='queued' AND product = ANY(:caps) RETURNING ... LIMIT 1` — Postgres' row-level locking is the single source of truth that two agents can't both claim. |
-| `JobEvent[]` on each Job | Postgres `job_events` table with FK; lazy-loaded for the dashboard. |
+| `SQLiteJobStore` (single-file SQLite, WAL) | Postgres table `jobs(id PK, product, status, assigned_agent_id, assigned_agent_epoch, attempt_count, submitter, ...)`. The atomic claim becomes `UPDATE ... WHERE status='queued' AND product = ANY(:caps) RETURNING ... LIMIT 1` — Postgres' row-level locking is the single source of truth that two agents can't both claim. |
+| `job_events` table (SQLite, FK) | Same schema in Postgres; the `JobStore` Protocol swap requires no changes to routes, dispatcher, or agents. |
 
 The clean interfaces mean the swap is module-local: no route changes, no agent changes.
 
@@ -93,7 +93,8 @@ This is policy-heavy and customer-driven — no point building it before there a
 
 If you handed me this same problem at 1,000 agents on day 1, I'd build it in this order:
 
-1. Postgres `JobStore` + `SELECT FOR UPDATE SKIP LOCKED` claim. (Days 1-3)
+1. ~~SQLite `JobStore`~~ ✅ Already done — single-file SQLite with WAL mode, full event history, survives restarts.
+2. Postgres `JobStore` + `SELECT FOR UPDATE SKIP LOCKED` claim. (Days 1-3)
 2. Redis `AgentRegistry` for heartbeats. (Day 4)
 3. Stateless dispatcher replicas + Postgres-advisory-lock watchdog leader. (Days 5-6)
 4. NATS-based wake-ups (replace polling). (Days 7-9)
