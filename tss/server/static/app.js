@@ -71,6 +71,11 @@
         }
       });
     }
+    const closeBtn = document.getElementById("job-panel-close");
+    if (closeBtn) closeBtn.addEventListener("click", closeJobPanel);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeJobPanel();
+    });
   });
 
   // ---- Mine filter ----
@@ -84,6 +89,51 @@
     const mine = loadSubmitter();
     if (!mine) return jobs;
     return jobs.filter((j) => j.submitter === mine);
+  }
+
+  // ---- Job detail panel ----
+  const panel = () => document.getElementById("job-panel");
+
+  async function openJobPanel(jobId) {
+    try {
+      const resp = await fetch(`/api/jobs/${jobId}`);
+      if (!resp.ok) throw new Error(`status ${resp.status}`);
+      const job = await resp.json();
+      renderJobPanel(job);
+      const p = panel();
+      if (p) p.hidden = false;
+    } catch (e) {
+      console.error("failed to load job", jobId, e);
+    }
+  }
+
+  function closeJobPanel() {
+    const p = panel();
+    if (p) p.hidden = true;
+  }
+
+  function renderJobPanel(job) {
+    document.getElementById("job-panel-title").textContent = `Job ${job.id.slice(0, 8)}`;
+    document.getElementById("job-panel-id").textContent = job.id;
+    document.getElementById("job-panel-product").textContent = job.product;
+    document.getElementById("job-panel-status").textContent = job.status;
+    document.getElementById("job-panel-submitter").textContent = job.submitter || "—";
+    document.getElementById("job-panel-attempts").textContent =
+      `${job.attempt_count} of ${job.max_attempts}`;
+    document.getElementById("job-panel-agent").textContent =
+      job.assigned_agent_id || "—";
+    const events = document.getElementById("job-panel-events");
+    events.innerHTML = "";
+    for (const e of (job.history || [])) {
+      const li = document.createElement("li");
+      const at = new Date(e.at).toLocaleTimeString();
+      const tail = e.detail ? ` — ${e.detail}` : "";
+      const agent = e.agent_name ? ` [${e.agent_name}]` : "";
+      li.textContent = `${at}  ${e.kind}${agent}${tail}`;
+      events.appendChild(li);
+    }
+    document.getElementById("job-panel-raw").textContent =
+      JSON.stringify(job, null, 2);
   }
 
   const POLL_INTERVAL_MS = 1000;
@@ -279,6 +329,9 @@
       "queue-item-attempts" + (j.attempt_count >= 2 ? " warning" : "");
     attempts.textContent = `${j.attempt_count}/${j.max_attempts}`;
     item.appendChild(attempts);
+
+    item.style.cursor = "pointer";
+    item.addEventListener("click", () => openJobPanel(j.id));
 
     return item;
   }

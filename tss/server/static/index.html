@@ -119,5 +119,28 @@
   </footer>
 
   <script src="/static/app.js"></script>
+
+<aside id="job-panel" class="job-panel" hidden>
+  <header class="job-panel-header">
+    <h2 id="job-panel-title">Job</h2>
+    <button id="job-panel-close" type="button" aria-label="Close">×</button>
+  </header>
+  <section class="job-panel-meta">
+    <div><strong>id</strong><code id="job-panel-id"></code></div>
+    <div><strong>product</strong><span id="job-panel-product"></span></div>
+    <div><strong>status</strong><span id="job-panel-status"></span></div>
+    <div><strong>submitter</strong><span id="job-panel-submitter"></span></div>
+    <div><strong>attempts</strong><span id="job-panel-attempts"></span></div>
+    <div><strong>agent</strong><span id="job-panel-agent"></span></div>
+  </section>
+  <section class="job-panel-history">
+    <h3>History</h3>
+    <ol id="job-panel-events"></ol>
+  </section>
+  <details class="job-panel-raw">
+    <summary>Raw payload</summary>
+    <pre id="job-panel-raw"></pre>
+  </details>
+</aside>
 </body>
 </html>
