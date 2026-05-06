@@ -11,6 +11,15 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<div id="identity-banner" class="identity-banner" hidden>
+  <span>Tell us your name to filter jobs you submit:</span>
+  <input id="identity-input" type="text" maxlength="40" placeholder="e.g. jackson" autocomplete="off" />
+  <button id="identity-save" type="button">save</button>
+</div>
+<div id="identity-pill" class="identity-pill" hidden>
+  <span>as: <span id="identity-name"></span></span>
+  <button id="identity-change" type="button" title="Change">change</button>
+</div>
   <header class="topbar">
     <div class="topbar-left">
       <img src="/static/img/samsara-wordmark.png" alt="Samsara" class="logo">

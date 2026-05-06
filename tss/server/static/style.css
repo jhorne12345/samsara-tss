@@ -530,3 +530,44 @@ body {
     grid-template-rows: 1fr 1fr 1fr;
   }
 }
+
+/* ----- Identity banner + pill ----- */
+
+.identity-banner {
+  display: flex;
+  gap: .75rem;
+  align-items: center;
+  padding: .75rem 1rem;
+  background: var(--samsara-paper);
+  border-bottom: 1px solid var(--samsara-fog);
+  font-size: .9rem;
+  color: var(--samsara-text);
+}
+.identity-banner input {
+  font: inherit;
+  padding: .35rem .5rem;
+  border: 1px solid var(--samsara-fog-deep);
+  border-radius: 4px;
+  flex: 0 1 16rem;
+}
+.identity-banner button,
+.identity-pill button {
+  font: inherit;
+  padding: .35rem .75rem;
+  border: 1px solid var(--samsara-fog-deep);
+  border-radius: 4px;
+  background: var(--samsara-white);
+  cursor: pointer;
+}
+.identity-banner button:hover,
+.identity-pill button:hover { background: var(--samsara-fog); }
+.identity-pill {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  padding: .25rem .75rem;
+  background: var(--samsara-paper);
+  border-bottom: 1px solid var(--samsara-fog);
+  font-size: .85rem;
+  color: var(--samsara-slate);
+}

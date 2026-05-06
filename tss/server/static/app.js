@@ -6,6 +6,64 @@
 // trivial and the code is much simpler than a virtual-DOM library.
 
 (() => {
+  // ---- Identity (submitter) management ----
+  const STORAGE_KEY = "tss.submitter";
+
+  function loadSubmitter() {
+    try {
+      return localStorage.getItem(STORAGE_KEY) || "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function saveSubmitter(name) {
+    try {
+      localStorage.setItem(STORAGE_KEY, name);
+    } catch (e) {
+      /* localStorage disabled — accept and continue */
+    }
+    refreshIdentityUI();
+  }
+
+  function refreshIdentityUI() {
+    const banner = document.getElementById("identity-banner");
+    const pill = document.getElementById("identity-pill");
+    const nameEl = document.getElementById("identity-name");
+    const submitter = loadSubmitter();
+    if (submitter) {
+      banner.hidden = true;
+      pill.hidden = false;
+      if (nameEl) nameEl.textContent = submitter;
+    } else {
+      banner.hidden = false;
+      pill.hidden = true;
+    }
+  }
+
+  // Wire up identity UI on DOM ready
+  document.addEventListener("DOMContentLoaded", () => {
+    refreshIdentityUI();
+    const saveBtn = document.getElementById("identity-save");
+    const input = document.getElementById("identity-input");
+    if (saveBtn && input) {
+      saveBtn.addEventListener("click", () => {
+        const value = input.value.trim();
+        if (value) saveSubmitter(value);
+      });
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") saveBtn.click();
+      });
+    }
+    const changeBtn = document.getElementById("identity-change");
+    if (changeBtn) {
+      changeBtn.addEventListener("click", () => {
+        const name = prompt("Update your name:", loadSubmitter());
+        if (name !== null) saveSubmitter(name.trim());
+      });
+    }
+  });
+
   const POLL_INTERVAL_MS = 1000;
   const els = {
     statIdle: document.getElementById("stat-idle"),
