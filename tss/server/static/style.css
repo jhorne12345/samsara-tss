@@ -533,6 +533,10 @@ body {
 
 /* ----- Identity banner + pill ----- */
 
+/* display:flex would override the [hidden] attribute in some browsers */
+.identity-banner[hidden],
+.identity-pill[hidden] { display: none !important; }
+
 .identity-banner {
   display: flex;
   gap: .75rem;
