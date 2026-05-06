@@ -82,3 +82,85 @@ class SQLiteJobStore:
 
     def close(self) -> None:
         self._conn.close()
+
+    # ----- Serialization helpers -----
+
+    @staticmethod
+    def _iso(dt: datetime | None) -> str | None:
+        if dt is None:
+            return None
+        return dt.isoformat()
+
+    @staticmethod
+    def _parse_iso(s: str | None) -> datetime | None:
+        if s is None:
+            return None
+        return datetime.fromisoformat(s)
+
+    def _row_to_job(self, row: sqlite3.Row, events: list[JobEvent]) -> Job:
+        return Job(
+            id=UUID(row["id"]),
+            product=row["product"],
+            status=JobStatus(row["status"]),
+            duration_seconds=row["duration_seconds"],
+            expected_exit_code=row["expected_exit_code"],
+            crash_at_pct=row["crash_at_pct"],
+            slow_multiplier=row["slow_multiplier"],
+            assigned_agent_id=UUID(row["assigned_agent_id"]) if row["assigned_agent_id"] else None,
+            assigned_agent_epoch=row["assigned_agent_epoch"],
+            attempt_count=row["attempt_count"],
+            max_attempts=row["max_attempts"],
+            submitter=row["submitter"],
+            created_at=self._parse_iso(row["created_at"]),  # type: ignore[arg-type]
+            started_at=self._parse_iso(row["started_at"]),
+            completed_at=self._parse_iso(row["completed_at"]),
+            history=events,
+        )
+
+    # ----- Mutations -----
+
+    def add(self, job: Job) -> None:
+        order = self._next_order
+        self._next_order += 1
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO jobs (
+                  id, product, status, duration_seconds, expected_exit_code,
+                  crash_at_pct, slow_multiplier, assigned_agent_id,
+                  assigned_agent_epoch, attempt_count, max_attempts,
+                  submitter, created_at, started_at, completed_at, insertion_order
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(job.id),
+                    job.product,
+                    job.status.value,
+                    job.duration_seconds,
+                    job.expected_exit_code,
+                    job.crash_at_pct,
+                    job.slow_multiplier,
+                    str(job.assigned_agent_id) if job.assigned_agent_id else None,
+                    job.assigned_agent_epoch,
+                    job.attempt_count,
+                    job.max_attempts,
+                    job.submitter,
+                    self._iso(job.created_at),
+                    self._iso(job.started_at),
+                    self._iso(job.completed_at),
+                    order,
+                ),
+            )
+            # History persistence added in Task 6
+
+    # ----- Reads -----
+
+    def get(self, job_id: UUID) -> Job | None:
+        cursor = self._conn.execute(
+            "SELECT * FROM jobs WHERE id = ?", (str(job_id),)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        # History fetched in Task 6 — for now, empty list.
+        return self._row_to_job(row, events=[])

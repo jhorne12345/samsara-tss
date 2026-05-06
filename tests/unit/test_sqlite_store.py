@@ -39,3 +39,39 @@ def test_init_creates_required_indexes() -> None:
     index_names = {row[0] for row in cursor.fetchall()}
     assert "idx_jobs_status_product" in index_names
     assert "idx_jobs_submitter" in index_names
+
+
+from datetime import UTC, datetime
+from tss.common.models import Job, JobStatus
+
+
+def _make_job(**overrides: object) -> Job:
+    base = {
+        "product": "vehicle_gateway",
+        "duration_seconds": 8.0,
+        "submitter": "alice",
+        "created_at": datetime(2026, 5, 6, 10, 0, 0, tzinfo=UTC),
+    }
+    base.update(overrides)
+    return Job(**base)  # type: ignore[arg-type]
+
+
+def test_add_and_get_round_trips_a_job() -> None:
+    store = SQLiteJobStore(":memory:")
+    job = _make_job()
+    store.add(job)
+    fetched = store.get(job.id)
+    assert fetched is not None
+    assert fetched.id == job.id
+    assert fetched.product == "vehicle_gateway"
+    assert fetched.duration_seconds == 8.0
+    assert fetched.submitter == "alice"
+    assert fetched.status == JobStatus.QUEUED
+    assert fetched.attempt_count == 0
+    assert fetched.created_at == job.created_at
+
+
+def test_get_returns_none_for_unknown_id() -> None:
+    from uuid import uuid4
+    store = SQLiteJobStore(":memory:")
+    assert store.get(uuid4()) is None
