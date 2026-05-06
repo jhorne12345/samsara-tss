@@ -131,22 +131,93 @@ The three race-condition tests are non-negotiable:
 
 ## API reference
 
-| Method | Path                                            | Description |
-|--------|-------------------------------------------------|-------------|
-| POST   | `/api/agents/register`                          | Register or re-register; returns `{agent_id, epoch, ...}`. |
-| POST   | `/api/agents/{id}/heartbeat`                    | 204 if accepted, 410 if pruned (must re-register). |
-| POST   | `/api/agents/{id}/kill`                         | Demo-only: simulates immediate disconnect. |
-| GET    | `/api/agents`                                   | List all agents. |
-| GET    | `/api/agents/{id}/jobs/next`                    | Atomic claim. 200 + assignment, 204 if no compatible job. |
-| POST   | `/api/agents/{id}/jobs/{job_id}/result`         | 204 if accepted, 409 if stale (epoch mismatch or wrong owner). |
-| POST   | `/api/jobs`                                     | Submit a job (body includes `submitter`). |
-| GET    | `/api/jobs`                                     | List jobs (optional `status_filter`, `product`, `submitter`). |
-| GET    | `/api/jobs/{job_id}`                            | Full job record including event history. |
-| GET    | `/api/fleet/status`                             | Snapshot for the dashboard. |
-| GET    | `/metrics`                                      | Prometheus text-format fleet metrics (no extra deps). |
-| GET    | `/`                                             | Dashboard HTML. |
+OpenAPI docs are auto-generated at `/docs` (Swagger UI) and `/redoc`.
 
-OpenAPI docs are auto-generated at `/docs`.
+### Agents
+
+**`POST /api/agents/register`** — Register or re-register a testbed. Safe to call repeatedly; increments the agent's epoch on each call so stale in-flight results from a previous incarnation are rejected.
+
+```jsonc
+// request
+{ "name": "vg-01", "capabilities": ["vehicle_gateway"] }
+
+// response 200
+{ "agent_id": "<uuid>", "epoch": 1, "heartbeat_interval_s": 2.0, "poll_interval_s": 1.0 }
+```
+
+**`POST /api/agents/{agent_id}/heartbeat`** — Keep-alive from an agent. Must echo the current `epoch`.
+
+```jsonc
+// request
+{ "epoch": 1 }
+// 204 accepted  |  410 Gone → agent was pruned, must re-register
+```
+
+**`GET /api/agents/{agent_id}/jobs/next`** — Atomic job claim. The dispatcher matches the agent's capabilities against the queued jobs and assigns the oldest compatible one in a single lock step.
+
+```jsonc
+// 200 — job assigned
+{
+  "job_id": "<uuid>", "product": "vehicle_gateway",
+  "duration_seconds": 8.0, "expected_exit_code": 0,
+  "crash_at_pct": null, "slow_multiplier": 1.0, "epoch": 1
+}
+// 204 — no compatible job waiting
+// 409 — agent is already running a job
+// 410 — agent unknown, must re-register
+```
+
+**`POST /api/agents/{agent_id}/jobs/{job_id}/result`** — Report a job outcome. The `epoch` must match what was in the assignment; a mismatch means the agent was considered offline and a new agent already owns the job.
+
+```jsonc
+// request
+{ "epoch": 1, "exit_code": 0, "duration_actual": 7.4, "error_message": null }
+// 204 accepted  |  409 stale/wrong owner  |  410 unknown agent  |  404 unknown job
+```
+
+**`GET /api/agents`** — List all registered agents with their current status (`idle`, `busy`, `offline`).
+
+**`POST /api/agents/{agent_id}/kill`** — Demo only. Simulates an immediate disconnect so you can watch job reassignment on the dashboard. Returns 204.
+
+---
+
+### Jobs
+
+**`POST /api/jobs`** — Submit a test job. Only `product` and `duration_seconds` are required.
+
+```jsonc
+// request
+{
+  "product": "vehicle_gateway",   // required — must match an agent capability
+  "duration_seconds": 8.0,        // required
+  "submitter": "alice",           // optional, defaults to "unknown"
+  "expected_exit_code": 0,        // optional
+  "max_attempts": 3               // optional, 1–10; how many times to retry on agent failure
+}
+
+// response 201
+{ "job_id": "<uuid>" }
+```
+
+**`GET /api/jobs`** — List all jobs. Supports query-string filters:
+
+| Parameter | Values | Effect |
+|---|---|---|
+| `status_filter` | `queued`, `running`, `completed`, `failed` | Return only jobs in this state |
+| `product` | any string | Return only jobs for this product |
+| `submitter` | any string | Return only jobs from this submitter |
+
+**`GET /api/jobs/{job_id}`** — Full job record including `history` (the ordered list of `JobEvent` objects that records every state transition: submitted, claimed, reassigned, completed, etc.).
+
+---
+
+### Fleet and metrics
+
+**`GET /api/fleet/status`** — Dashboard snapshot: full agent list, queue, running jobs, recent events across all jobs, and aggregate counts.
+
+**`GET /metrics`** — Prometheus text format. Exposes `tss_agents_total{status}` and `tss_jobs_total{status}` gauges. No extra dependencies required.
+
+**`GET /`** — Live dashboard HTML.
 
 ## Configuration
 
