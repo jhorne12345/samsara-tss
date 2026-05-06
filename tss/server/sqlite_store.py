@@ -214,3 +214,40 @@ class SQLiteJobStore:
                 )
             )
         return events
+
+    # ----- Reads (continued) -----
+
+    def all(self) -> list[Job]:
+        cursor = self._conn.execute(
+            "SELECT * FROM jobs ORDER BY insertion_order ASC"
+        )
+        return [self._row_to_job(row, self._fetch_events(UUID(row["id"]))) for row in cursor.fetchall()]
+
+    def by_status(self, status: JobStatus) -> list[Job]:
+        cursor = self._conn.execute(
+            "SELECT * FROM jobs WHERE status = ? ORDER BY insertion_order ASC",
+            (status.value,),
+        )
+        return [self._row_to_job(row, self._fetch_events(UUID(row["id"]))) for row in cursor.fetchall()]
+
+    def find_queued_for_capabilities(self, capabilities: Iterable[str]) -> Job | None:
+        caps = list(capabilities)
+        if not caps:
+            return None
+        placeholders = ",".join("?" for _ in caps)
+        query = (
+            f"SELECT * FROM jobs WHERE status = ? AND product IN ({placeholders}) "
+            "ORDER BY insertion_order ASC LIMIT 1"
+        )
+        cursor = self._conn.execute(query, (JobStatus.QUEUED.value, *caps))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_job(row, self._fetch_events(UUID(row["id"])))
+
+    def __iter__(self) -> Iterator[Job]:
+        return iter(self.all())
+
+    def __len__(self) -> int:
+        cursor = self._conn.execute("SELECT COUNT(*) FROM jobs")
+        return int(cursor.fetchone()[0])

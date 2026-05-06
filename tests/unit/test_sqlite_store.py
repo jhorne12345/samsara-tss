@@ -139,3 +139,57 @@ def test_update_is_idempotent_for_same_events() -> None:
     fetched = store.get(job.id)
     assert fetched is not None
     assert len(fetched.history) == 1
+
+
+def test_all_returns_jobs_in_insertion_order() -> None:
+    store = SQLiteJobStore(":memory:")
+    job_a = _make_job(submitter="a")
+    job_b = _make_job(submitter="b")
+    job_c = _make_job(submitter="c")
+    store.add(job_a)
+    store.add(job_b)
+    store.add(job_c)
+    submitters = [j.submitter for j in store.all()]
+    assert submitters == ["a", "b", "c"]
+
+
+def test_by_status_filters_correctly() -> None:
+    store = SQLiteJobStore(":memory:")
+    j1 = _make_job(submitter="x")
+    j2 = _make_job(submitter="y")
+    store.add(j1)
+    store.add(j2)
+    j2.status = JobStatus.RUNNING
+    store.update(j2)
+    queued = store.by_status(JobStatus.QUEUED)
+    running = store.by_status(JobStatus.RUNNING)
+    assert [j.submitter for j in queued] == ["x"]
+    assert [j.submitter for j in running] == ["y"]
+
+
+def test_find_queued_for_capabilities_returns_oldest_match_in_order() -> None:
+    store = SQLiteJobStore(":memory:")
+    asset = _make_job(product="asset_gateway", submitter="a")
+    vg_first = _make_job(product="vehicle_gateway", submitter="b")
+    vg_second = _make_job(product="vehicle_gateway", submitter="c")
+    store.add(asset)
+    store.add(vg_first)
+    store.add(vg_second)
+    found = store.find_queued_for_capabilities(["vehicle_gateway"])
+    assert found is not None
+    assert found.submitter == "b"
+
+
+def test_find_queued_returns_none_when_no_match() -> None:
+    store = SQLiteJobStore(":memory:")
+    store.add(_make_job(product="asset_gateway"))
+    assert store.find_queued_for_capabilities(["vehicle_gateway"]) is None
+
+
+def test_iter_and_len() -> None:
+    store = SQLiteJobStore(":memory:")
+    assert len(store) == 0
+    store.add(_make_job())
+    store.add(_make_job(submitter="b"))
+    assert len(store) == 2
+    assert sum(1 for _ in store) == 2
