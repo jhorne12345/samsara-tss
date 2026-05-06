@@ -68,15 +68,30 @@
     if (mineToggle) {
       mineToggle.checked = !!loadSubmitter();
       mineToggle.addEventListener("change", () => {
-        if (window.__lastFleetData) {
-          renderJobs(window.__lastFleetData.queue, window.__lastFleetData.running_jobs);
-        }
+        if (window.__lastFleetData) render(window.__lastFleetData);
       });
     }
     const closeBtn = document.getElementById("job-panel-close");
     if (closeBtn) closeBtn.addEventListener("click", closeJobPanel);
+    const closeAgentBtn = document.getElementById("agent-panel-close");
+    if (closeAgentBtn) closeAgentBtn.addEventListener("click", closeAgentPanel);
+    const eventAgentSel = document.getElementById("event-agent-filter");
+    if (eventAgentSel) {
+      eventAgentSel.addEventListener("change", () => {
+        if (window.__lastFleetData) renderEvents(window.__lastFleetData.recent_events);
+      });
+    }
+    const jobStatusSel = document.getElementById("job-status-filter");
+    if (jobStatusSel) {
+      jobStatusSel.addEventListener("change", () => {
+        if (window.__lastFleetData) renderJobsTable(window.__lastFleetData);
+      });
+    }
+    document.querySelectorAll(".tss-table-jobs th.sortable").forEach((th) => {
+      th.addEventListener("click", () => cycleJobSort(th.dataset.sort));
+    });
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeJobPanel();
+      if (e.key === "Escape") { closeJobPanel(); closeAgentPanel(); }
     });
   });
 
@@ -86,11 +101,20 @@
     return t ? t.checked : false;
   }
 
+  function normalizeSubmitter(s) {
+    return (s || "").trim().toLowerCase();
+  }
+
+  function isMine(submitter) {
+    const mine = normalizeSubmitter(loadSubmitter());
+    if (!mine) return false;
+    return normalizeSubmitter(submitter) === mine;
+  }
+
   function applySubmitterFilter(jobs) {
     if (!isMineOn()) return jobs;
-    const mine = loadSubmitter();
-    if (!mine) return jobs;
-    return jobs.filter((j) => j.submitter === mine);
+    if (!normalizeSubmitter(loadSubmitter())) return jobs;
+    return jobs.filter((j) => isMine(j.submitter));
   }
 
   // ---- Job detail panel ----
@@ -112,6 +136,68 @@
   function closeJobPanel() {
     const p = panel();
     if (p) p.hidden = true;
+  }
+
+  // ---- Agent detail panel ----
+  const agentPanel = () => document.getElementById("agent-panel");
+
+  async function openAgentPanel(agentId) {
+    try {
+      const resp = await fetch(`/api/agents/${agentId}/history`);
+      if (!resp.ok) throw new Error(`status ${resp.status}`);
+      const data = await resp.json();
+      renderAgentPanel(data);
+      const p = agentPanel();
+      if (p) p.hidden = false;
+    } catch (e) {
+      console.error("failed to load agent", agentId, e);
+    }
+  }
+
+  function closeAgentPanel() {
+    const p = agentPanel();
+    if (p) p.hidden = true;
+  }
+
+  function renderAgentPanel(data) {
+    const a = data.agent;
+    document.getElementById("agent-panel-title").textContent = `Agent ${a.name}`;
+    document.getElementById("agent-panel-id").textContent = a.id;
+    document.getElementById("agent-panel-caps").textContent = a.capabilities.join(", ");
+    document.getElementById("agent-panel-status").textContent = a.status;
+    document.getElementById("agent-panel-epoch").textContent = a.epoch;
+    document.getElementById("agent-panel-job").textContent = a.current_job_id || "—";
+    document.getElementById("agent-panel-registered").textContent =
+      new Date(a.registered_at).toLocaleString();
+    document.getElementById("agent-panel-heartbeat").textContent =
+      relativeTime(new Date(a.last_heartbeat_at));
+    const killBtn = document.getElementById("agent-panel-kill");
+    if (killBtn) {
+      killBtn.disabled = a.status === "offline";
+      killBtn.textContent = a.status === "offline" ? "offline" : "kill (demo)";
+      killBtn.onclick = () => killAgent(a.id, killBtn);
+    }
+    const events = document.getElementById("agent-panel-events");
+    events.innerHTML = "";
+    if (!data.events.length) {
+      const li = document.createElement("li");
+      li.className = "empty-state-small";
+      li.textContent = "no events yet";
+      events.appendChild(li);
+      return;
+    }
+    for (const e of data.events) {
+      const li = document.createElement("li");
+      const at = new Date(e.at).toLocaleTimeString();
+      const tail = e.detail ? ` — ${e.detail}` : "";
+      li.textContent = `${at}  ${e.kind} · job ${e.job_id.slice(0, 8)} · ${e.product}${tail}`;
+      li.style.cursor = "pointer";
+      li.addEventListener("click", () => {
+        closeAgentPanel();
+        openJobPanel(e.job_id);
+      });
+      events.appendChild(li);
+    }
   }
 
   function renderJobPanel(job) {
@@ -152,8 +238,7 @@
   }
 
   function notifyTerminal(job) {
-    const submitter = loadSubmitter();
-    if (!submitter || job.submitter !== submitter) return;
+    if (!isMine(job.submitter)) return;
     const body = job.status === "completed"
       ? `Job ${job.id.slice(0, 8)} completed`
       : `Job ${job.id.slice(0, 8)} failed`;
@@ -197,25 +282,55 @@
 
   const POLL_INTERVAL_MS = 1000;
   const els = {
-    statIdle: document.getElementById("stat-idle"),
-    statBusy: document.getElementById("stat-busy"),
-    statOffline: document.getElementById("stat-offline"),
-    statQueue: document.getElementById("stat-queue"),
-    statRunning: document.getElementById("stat-running"),
-    statCompleted: document.getElementById("stat-completed"),
-    statFailed: document.getElementById("stat-failed"),
-    agentsMeta: document.getElementById("agents-meta"),
-    agentGrid: document.getElementById("agent-grid"),
-    queueList: document.getElementById("queue-list"),
-    queueMeta: document.getElementById("queue-meta"),
-    runningList: document.getElementById("running-list"),
+    pulseDots: document.getElementById("pulse-dots"),
+    pulseQueue: document.getElementById("pulse-queue"),
+    pulseRunning: document.getElementById("pulse-running"),
+    pulseDone: document.getElementById("pulse-done"),
+    pulseFailed: document.getElementById("pulse-failed"),
+    pulseOffline: document.getElementById("pulse-offline"),
+    jobsList: document.getElementById("jobs-list"),
+    jobsMeta: document.getElementById("jobs-meta"),
     eventsList: document.getElementById("events-list"),
     pollStatus: document.getElementById("poll-status"),
   };
 
   const state = {
     lastFetchAt: null,
+    jobSort: null, // { col, dir } or null = use smart default
   };
+
+  const JOB_SORTERS = {
+    id:      (a, b) => a.id.localeCompare(b.id),
+    product: (a, b) => a.product.localeCompare(b.product),
+    status:  (a, b) => a.status.localeCompare(b.status),
+    when: (a, b) => {
+      const ta = new Date(a.completed_at || a.started_at || a.created_at);
+      const tb = new Date(b.completed_at || b.started_at || b.created_at);
+      return ta - tb;
+    },
+  };
+
+  function cycleJobSort(col) {
+    const cur = state.jobSort;
+    if (!cur || cur.col !== col) {
+      state.jobSort = { col, dir: "asc" };
+    } else if (cur.dir === "asc") {
+      state.jobSort = { col, dir: "desc" };
+    } else {
+      state.jobSort = null;
+    }
+    if (window.__lastFleetData) renderJobsTable(window.__lastFleetData);
+    refreshSortIndicators();
+  }
+
+  function refreshSortIndicators() {
+    document.querySelectorAll(".tss-table-jobs th.sortable").forEach((th) => {
+      th.classList.remove("sort-asc", "sort-desc");
+      if (state.jobSort && th.dataset.sort === state.jobSort.col) {
+        th.classList.add(state.jobSort.dir === "asc" ? "sort-asc" : "sort-desc");
+      }
+    });
+  }
 
   async function tick() {
     try {
@@ -238,102 +353,175 @@
 
   function render(data) {
     window.__lastFleetData = data;
-    renderStats(data.stats);
-    renderAgents(data.agents);
-    renderJobs(data.queue, data.running_jobs);
+    syncEventAgentOptions(data.agents);
+    renderPulse(data);
+    renderJobsTable(data);
     renderEvents(data.recent_events);
   }
 
-  function renderStats(s) {
-    els.statIdle.textContent = s.idle;
-    els.statBusy.textContent = s.busy;
-    els.statOffline.textContent = s.offline;
-    els.statQueue.textContent = s.queue_depth;
-    els.statRunning.textContent = s.jobs_running;
-    els.statCompleted.textContent = s.jobs_completed;
-    els.statFailed.textContent = s.jobs_failed;
-    els.agentsMeta.textContent =
-      s.total_agents === 1 ? "1 testbed" : `${s.total_agents} testbeds`;
-    els.queueMeta.textContent =
-      s.queue_depth === 1 ? "1 job" : `${s.queue_depth} jobs`;
+  function renderPulse(data) {
+    const s = data.stats;
+    // Dots — one per agent, sorted by name, status-coloured, click → slide-in.
+    const sorted = data.agents.slice().sort((a, b) => a.name.localeCompare(b.name));
+    const dots = sorted.map((a) => {
+      const dot = document.createElement("span");
+      dot.className = `pulse-dot status-${a.status}`;
+      dot.title = `${a.name} · ${a.status}`;
+      dot.dataset.agentId = a.id;
+      dot.addEventListener("click", () => openAgentPanel(a.id));
+      return dot;
+    });
+    if (!dots.length) {
+      const empty = document.createElement("span");
+      empty.className = "timeline-empty";
+      empty.textContent = "no testbeds registered";
+      els.pulseDots.replaceChildren(empty);
+    } else {
+      els.pulseDots.replaceChildren(...dots);
+    }
+
+    // Numbers — queue/running reflect the Mine-only filter when on, so the
+    // header doesn't disagree with the table below it.
+    const queueLen   = applySubmitterFilter(data.queue).length;
+    const runningLen = applySubmitterFilter(data.running_jobs).length;
+    els.pulseQueue.textContent = queueLen;
+    els.pulseRunning.textContent = runningLen;
+    els.pulseDone.textContent = s.jobs_completed;
+    els.pulseFailed.textContent = s.jobs_failed;
+    els.pulseOffline.textContent = s.offline;
+
+    els.pulseFailed.parentElement.classList.toggle("has-failures", s.jobs_failed > 0);
+    els.pulseOffline.parentElement.classList.toggle("has-offline", s.offline > 0);
   }
 
-  function renderAgents(agents) {
-    if (!agents.length) {
-      // empty state already in DOM from the initial HTML; only re-render if
-      // we previously had content.
-      if (els.agentGrid.dataset.populated === "true") {
-        els.agentGrid.dataset.populated = "false";
-        els.agentGrid.innerHTML = `
-          <div class="empty-state">
-            <img src="/static/img/owl-192.png" alt="" class="empty-mark">
-            <p>No testbeds registered yet.</p>
-            <p class="empty-hint">Run <code>tss agent --name vg-01 --caps vehicle_gateway</code></p>
-          </div>`;
-      }
+  function renderJobsTable(data) {
+    const all = [
+      ...(data.queue || []),
+      ...(data.running_jobs || []),
+      ...(data.recent_completed || []),
+    ];
+    // Deduplicate by id (a job can appear in both queue/running across ticks).
+    const byId = new Map();
+    for (const j of all) byId.set(j.id, j);
+    let jobs = Array.from(byId.values());
+
+    // Filters
+    jobs = applySubmitterFilter(jobs);
+    const statusFilter = document.getElementById("job-status-filter")?.value || "";
+    if (statusFilter) jobs = jobs.filter((j) => j.status === statusFilter);
+
+    if (state.jobSort && JOB_SORTERS[state.jobSort.col]) {
+      const cmp = JOB_SORTERS[state.jobSort.col];
+      const sign = state.jobSort.dir === "asc" ? 1 : -1;
+      jobs.sort((a, b) => sign * cmp(a, b));
+    } else {
+      // Smart default: running, queued, then most recent terminal.
+      jobs.sort((a, b) => {
+        const rank = (j) => ({ running: 0, queued: 1, completed: 2, failed: 2 }[j.status] ?? 3);
+        const ra = rank(a), rb = rank(b);
+        if (ra !== rb) return ra - rb;
+        if (ra <= 1) return new Date(a.created_at) - new Date(b.created_at);
+        return new Date(b.completed_at || b.created_at) - new Date(a.completed_at || a.created_at);
+      });
+    }
+
+    if (els.jobsMeta) {
+      els.jobsMeta.textContent = jobs.length === 1 ? "1 job" : `${jobs.length} jobs`;
+    }
+    if (!jobs.length) {
+      els.jobsList.replaceChildren(emptyRow("no jobs match", 5));
       return;
     }
-    els.agentGrid.dataset.populated = "true";
-    const tiles = agents
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map(renderAgentTile);
-    els.agentGrid.replaceChildren(...tiles);
+    els.jobsList.replaceChildren(...jobs.map(renderJobRow));
   }
 
-  function renderAgentTile(a) {
-    const tile = document.createElement("div");
-    tile.className = `agent-tile status-${a.status}`;
-    tile.dataset.agentId = a.id;
+  function renderJobRow(j) {
+    const tr = document.createElement("tr");
+    tr.dataset.jobId = j.id;
 
-    const nameRow = document.createElement("div");
-    nameRow.className = "agent-row";
-    nameRow.innerHTML = `
-      <span class="agent-name">${escapeHtml(a.name)}</span>
-      <span class="agent-status status-${a.status}">${a.status}</span>`;
-    tile.appendChild(nameRow);
+    tr.appendChild(td(j.id.slice(0, 8), "cell-id"));
+    tr.appendChild(td(j.product.replace(/_/g, " "), "cell-product"));
 
-    const caps = document.createElement("div");
-    caps.className = "agent-caps";
-    for (const c of a.capabilities) {
-      const b = document.createElement("span");
-      b.className = "cap-badge";
-      b.textContent = c.replace(/_/g, " ");
-      caps.appendChild(b);
-    }
-    tile.appendChild(caps);
+    const statusTd = document.createElement("td");
+    statusTd.className = "cell-status";
+    const pill = document.createElement("span");
+    pill.className = `status-pill ${j.status}`;
+    pill.textContent = j.status;
+    statusTd.appendChild(pill);
+    tr.appendChild(statusTd);
 
-    const meta = document.createElement("div");
-    meta.className = "agent-meta";
-    const lastHb = relativeTime(new Date(a.last_heartbeat_at));
-    const job = a.current_job_id ? a.current_job_id.slice(0, 8) : "—";
-    meta.innerHTML = `
-      <div class="agent-meta-row"><span>job</span><span>${escapeHtml(job)}</span></div>
-      <div class="agent-meta-row"><span>epoch</span><span>${a.epoch}</span></div>
-      <div class="agent-meta-row"><span>heartbeat</span><span>${escapeHtml(lastHb)}</span></div>`;
-    tile.appendChild(meta);
+    const timelineTd = document.createElement("td");
+    timelineTd.className = "cell-timeline";
+    timelineTd.appendChild(buildTimeline(j));
+    tr.appendChild(timelineTd);
 
-    if (a.status === "busy") {
-      // Approximate progress: we don't have job duration on the agent record,
-      // so just show an indeterminate bar. The exact progress lives on the job.
-      const progress = document.createElement("div");
-      progress.className = "progress";
-      const bar = document.createElement("div");
-      bar.className = "progress-bar";
-      bar.style.width = "60%";
-      progress.appendChild(bar);
-      tile.appendChild(progress);
-    }
+    tr.appendChild(td(jobWhen(j), "cell-when"));
 
-    const kill = document.createElement("button");
-    kill.className = "kill-button";
-    kill.textContent = a.status === "offline" ? "offline" : "kill (demo)";
-    kill.disabled = a.status === "offline";
-    kill.addEventListener("click", () => killAgent(a.id, kill));
-    tile.appendChild(kill);
-
-    return tile;
+    tr.addEventListener("click", () => openJobPanel(j.id));
+    return tr;
   }
+
+  function jobWhen(j) {
+    if (j.status === "completed" || j.status === "failed") {
+      return `${j.status} ${j.completed_at ? relativeTime(new Date(j.completed_at)) : ""}`.trim();
+    }
+    if (j.status === "running") {
+      return `started ${j.started_at ? relativeTime(new Date(j.started_at)) : "—"}`;
+    }
+    return `submitted ${relativeTime(new Date(j.created_at))}`;
+  }
+
+  // Distill a job's history into a one-line story of which agents touched it
+  // and what happened on each. Reassignment is the interesting story —
+  // dropped agents are styled struck-through; the final outcome is the
+  // colored chip at the end.
+  function buildTimeline(job) {
+    const wrap = document.createElement("span");
+    wrap.className = "timeline";
+    const hist = job.history || [];
+
+    // Walk history and build (agent_name, outcome) entries in claim order.
+    const entries = []; // [{name, outcome}]
+    let current = null;
+    for (const e of hist) {
+      if (e.kind === "claimed") {
+        if (current) entries.push(current);
+        current = { name: e.agent_name || "?", outcome: "running" };
+      } else if (e.kind === "completed" && current) {
+        current.outcome = "completed";
+      } else if (e.kind === "failed" && current) {
+        current.outcome = "failed";
+      } else if (e.kind === "reassigned" && current) {
+        current.outcome = "dropped";
+      } else if (e.kind === "overrun" && current) {
+        current.outcome = "dropped";
+      }
+    }
+    if (current) entries.push(current);
+
+    if (!entries.length) {
+      const empty = document.createElement("span");
+      empty.className = "timeline-empty";
+      empty.textContent = job.status === "queued" ? "waiting for agent" : "—";
+      wrap.appendChild(empty);
+      return wrap;
+    }
+
+    entries.forEach((entry, i) => {
+      if (i > 0) {
+        const arrow = document.createElement("span");
+        arrow.className = "timeline-arrow";
+        arrow.textContent = "→";
+        wrap.appendChild(arrow);
+      }
+      const chip = document.createElement("span");
+      chip.className = `timeline-chip outcome-${entry.outcome}`;
+      chip.textContent = entry.name;
+      wrap.appendChild(chip);
+    });
+    return wrap;
+  }
+
 
   async function killAgent(agentId, btn) {
     btn.disabled = true;
@@ -347,108 +535,96 @@
     // Next tick will re-render.
   }
 
-  function renderJobs(queue, running) {
-    renderJobList(els.queueList, applySubmitterFilter(queue), "queue is empty");
-    renderJobList(els.runningList, applySubmitterFilter(running), "no jobs running");
+
+  function selectedEventAgentId() {
+    const sel = document.getElementById("event-agent-filter");
+    return sel && sel.value ? sel.value : "";
   }
 
-  function renderJobList(container, jobs, emptyMsg) {
-    if (!jobs.length) {
-      container.replaceChildren(emptyDiv(emptyMsg));
-      return;
+  function applyEventFilter(events) {
+    let out = events;
+    if (isMineOn() && normalizeSubmitter(loadSubmitter())) {
+      out = out.filter((e) => isMine(e.submitter));
     }
-    const items = jobs
-      .slice()
-      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-      .map(renderJobItem);
-    container.replaceChildren(...items);
+    const agentId = selectedEventAgentId();
+    if (agentId) {
+      out = out.filter((e) => e.agent_id === agentId);
+    }
+    return out;
   }
 
-  function renderJobItem(j) {
-    const item = document.createElement("div");
-    item.className = `queue-item status-${j.status}`;
-    item.dataset.jobId = j.id;
-
-    const bar = document.createElement("div");
-    bar.className = "queue-item-bar";
-    item.appendChild(bar);
-
-    const info = document.createElement("div");
-    info.className = "queue-item-info";
-    const created = relativeTime(new Date(j.created_at));
-    const detail = j.status === "running"
-      ? `started ${j.started_at ? relativeTime(new Date(j.started_at)) : "—"} · ${j.duration_seconds.toFixed(1)}s declared`
-      : `submitted ${created} · ${j.duration_seconds.toFixed(1)}s`;
-    info.innerHTML = `
-      <span class="queue-item-product">${escapeHtml(j.product.replace(/_/g, " "))}</span>
-      <span class="queue-item-detail">${escapeHtml(j.id.slice(0, 8))} · ${escapeHtml(detail)}</span>`;
-    item.appendChild(info);
-
-    const attempts = document.createElement("span");
-    attempts.className =
-      "queue-item-attempts" + (j.attempt_count >= 2 ? " warning" : "");
-    attempts.textContent = `${j.attempt_count}/${j.max_attempts}`;
-    item.appendChild(attempts);
-
-    item.style.cursor = "pointer";
-    item.addEventListener("click", () => openJobPanel(j.id));
-
-    return item;
+  function syncEventAgentOptions(agents) {
+    const sel = document.getElementById("event-agent-filter");
+    if (!sel) return;
+    const current = sel.value;
+    const sorted = agents.slice().sort((a, b) => a.name.localeCompare(b.name));
+    const desiredKeys = sorted.map((a) => a.id).join(",");
+    if (sel.dataset.keys === desiredKeys) return; // no change, don't rebuild
+    sel.dataset.keys = desiredKeys;
+    sel.innerHTML = "";
+    const all = document.createElement("option");
+    all.value = ""; all.textContent = "all";
+    sel.appendChild(all);
+    for (const a of sorted) {
+      const opt = document.createElement("option");
+      opt.value = a.id;
+      opt.textContent = a.name;
+      sel.appendChild(opt);
+    }
+    if (current && sorted.some((a) => a.id === current)) sel.value = current;
   }
 
   function renderEvents(events) {
-    if (!events.length) {
-      els.eventsList.replaceChildren(emptyLi("waiting for events…"));
+    const filtered = applyEventFilter(events);
+    if (!filtered.length) {
+      els.eventsList.replaceChildren(emptyRow("waiting for events…", 5));
       return;
     }
-    const items = events.slice(0, 30).map(renderEventItem);
-    els.eventsList.replaceChildren(...items);
+    const rows = filtered.slice(0, 30).map(renderEventRow);
+    els.eventsList.replaceChildren(...rows);
   }
 
-  function renderEventItem(e) {
-    const li = document.createElement("li");
-    const t = new Date(e.at);
-    const time = document.createElement("span");
-    time.className = "event-time";
-    time.textContent = formatClock(t);
-    li.appendChild(time);
+  function renderEventRow(e) {
+    const tr = document.createElement("tr");
+    tr.appendChild(td(formatClock(new Date(e.at)), "cell-when"));
 
-    const line = document.createElement("span");
-    line.className = "event-line";
-    const kind = document.createElement("span");
-    kind.className = `event-kind kind-${e.kind}`;
-    kind.textContent = String(e.kind).replace(/_/g, " ");
-    line.appendChild(kind);
-    line.appendChild(
-      document.createTextNode(
-        `${e.product || ""}${e.agent_name ? " · " + e.agent_name : ""}`
-      )
-    );
-    li.appendChild(line);
+    const kindTd = document.createElement("td");
+    kindTd.className = "cell-kind";
+    const pill = document.createElement("span");
+    pill.className = `event-kind kind-${e.kind}`;
+    pill.textContent = String(e.kind).replace(/_/g, " ");
+    kindTd.appendChild(pill);
+    tr.appendChild(kindTd);
 
-    if (e.detail) {
-      const detail = document.createElement("span");
-      detail.className = "event-detail";
-      detail.textContent = e.detail;
-      li.appendChild(detail);
+    tr.appendChild(td(e.job_id ? e.job_id.slice(0, 8) : "—", "cell-id"));
+    tr.appendChild(td(e.agent_name || "—", "cell-agent"));
+    tr.appendChild(td(e.detail || "", "cell-detail"));
+
+    if (e.job_id) {
+      tr.addEventListener("click", () => openJobPanel(e.job_id));
+    } else {
+      tr.style.cursor = "default";
     }
-    return li;
+    return tr;
   }
 
   // ----- helpers -----
 
-  function emptyDiv(msg) {
-    const d = document.createElement("div");
-    d.className = "empty-state-small";
-    d.textContent = msg;
-    return d;
+  function td(text, className) {
+    const cell = document.createElement("td");
+    if (className) cell.className = className;
+    cell.textContent = text;
+    return cell;
   }
 
-  function emptyLi(msg) {
-    const li = document.createElement("li");
-    li.className = "empty-state-small";
-    li.textContent = msg;
-    return li;
+  function emptyRow(msg, colspan) {
+    const tr = document.createElement("tr");
+    tr.className = "empty-row";
+    const cell = document.createElement("td");
+    cell.colSpan = colspan;
+    cell.textContent = msg;
+    tr.appendChild(cell);
+    return tr;
   }
 
   function escapeHtml(s) {

@@ -7,10 +7,11 @@
   <link rel="icon" href="/static/favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+
 <div id="identity-banner" class="identity-banner" hidden>
   <span>Tell us your name to filter jobs you submit:</span>
   <input id="identity-input" type="text" maxlength="40" placeholder="e.g. jackson" autocomplete="off" />
@@ -20,105 +21,106 @@
   <span>as: <span id="identity-name"></span></span>
   <button id="identity-change" type="button" title="Change">change</button>
 </div>
-  <header class="topbar">
-    <div class="topbar-left">
-      <img src="/static/img/samsara-wordmark.png" alt="Samsara" class="logo">
-    </div>
-    <div class="topbar-center">
-      <h1>test scheduling service</h1>
-      <p class="subtitle">HIL testbed fleet · live status</p>
-    </div>
-    <div class="topbar-right">
-      <div class="stat" data-stat="idle">
-        <span class="stat-dot dot-idle"></span>
-        <span class="stat-label">idle</span>
-        <span class="stat-value" id="stat-idle">0</span>
-      </div>
-      <div class="stat" data-stat="busy">
-        <span class="stat-dot dot-busy"></span>
-        <span class="stat-label">busy</span>
-        <span class="stat-value" id="stat-busy">0</span>
-      </div>
-      <div class="stat" data-stat="offline">
-        <span class="stat-dot dot-offline"></span>
-        <span class="stat-label">offline</span>
-        <span class="stat-value" id="stat-offline">0</span>
-      </div>
-      <div class="stat-divider"></div>
-      <div class="stat">
-        <span class="stat-label">queue</span>
-        <span class="stat-value" id="stat-queue">0</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">running</span>
-        <span class="stat-value" id="stat-running">0</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">done</span>
-        <span class="stat-value" id="stat-completed">0</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">failed</span>
-        <span class="stat-value stat-failed" id="stat-failed">0</span>
-      </div>
-    </div>
-  </header>
 
-  <main class="layout">
-    <section class="panel panel-agents">
-      <header class="panel-header">
-        <h2>agents</h2>
-        <span class="panel-meta" id="agents-meta">0 testbeds</span>
-      </header>
-      <div id="agent-grid" class="agent-grid">
-        <div class="empty-state">
-          <img src="/static/img/owl-192.png" alt="" class="empty-mark">
-          <p>No testbeds registered yet.</p>
-          <p class="empty-hint">Run <code>tss agent --name vg-01 --caps vehicle_gateway</code></p>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel panel-queue">
-      <header class="panel-header">
-        <h2>queue</h2>
-        <span class="panel-meta" id="queue-meta">0 jobs</span>
-      </header>
-      <div class="filter-bar">
-        <label class="mine-toggle">
-          <input id="mine-toggle" type="checkbox" />
-          <span>Mine only</span>
-        </label>
-      </div>
-      <div id="queue-list" class="queue-list">
-        <div class="empty-state-small">queue is empty</div>
-      </div>
-
-      <header class="panel-header panel-header-secondary">
-        <h2>running</h2>
-      </header>
-      <div id="running-list" class="queue-list">
-        <div class="empty-state-small">no jobs running</div>
-      </div>
-    </section>
-
-    <section class="panel panel-events">
-      <header class="panel-header">
-        <h2>events</h2>
-        <span class="panel-meta">recent activity</span>
-      </header>
-      <ul id="events-list" class="events-list">
-        <li class="empty-state-small">waiting for events…</li>
-      </ul>
-    </section>
-  </main>
-
-  <footer class="footer">
-    <span>samsara · test scheduling service · proof-of-concept</span>
+<header class="topbar">
+  <div class="topbar-left">
+    <span class="hostname">TSS-01</span>
+    <span class="hostname-sep">/</span>
+    <span class="hostname-role">DISPATCHER</span>
+  </div>
+  <div class="topbar-center">
+    <h1>test scheduling service</h1>
+    <p class="subtitle">HIL testbed fleet · live telemetry</p>
+  </div>
+  <div class="topbar-right">
+    <span class="live-indicator"><span class="live-dot"></span>LIVE</span>
     <span id="poll-status" class="poll-status">connecting…</span>
-  </footer>
+  </div>
+</header>
 
-  <script src="/static/app.js"></script>
+<section class="fleet-pulse">
+  <div class="pulse-dots-wrap">
+    <span class="pulse-label">testbeds</span>
+    <div id="pulse-dots" class="pulse-dots"></div>
+  </div>
+  <div class="pulse-stats">
+    <div class="pulse-stat"><span class="pulse-num" id="pulse-queue">0</span><span class="pulse-name">queued</span></div>
+    <div class="pulse-stat"><span class="pulse-num" id="pulse-running">0</span><span class="pulse-name">running</span></div>
+    <div class="pulse-stat"><span class="pulse-num" id="pulse-done">0</span><span class="pulse-name">done</span></div>
+    <div class="pulse-stat pulse-stat-fail"><span class="pulse-num" id="pulse-failed">0</span><span class="pulse-name">failed</span></div>
+    <div class="pulse-stat pulse-stat-offline"><span class="pulse-num" id="pulse-offline">0</span><span class="pulse-name">offline</span></div>
+  </div>
+</section>
+
+<main class="layout-2col">
+  <section class="panel panel-jobs">
+    <header class="panel-header">
+      <h2>jobs</h2>
+      <span class="panel-meta" id="jobs-meta">0 jobs</span>
+    </header>
+    <div class="filter-bar filter-bar-jobs">
+      <label class="mine-toggle">
+        <input id="mine-toggle" type="checkbox" />
+        <span>Mine only</span>
+      </label>
+      <label class="event-filter">
+        <span>status</span>
+        <select id="job-status-filter">
+          <option value="">all</option>
+          <option value="queued">queued</option>
+          <option value="running">running</option>
+          <option value="completed">completed</option>
+          <option value="failed">failed</option>
+        </select>
+      </label>
+    </div>
+    <div class="tss-table-wrap tss-table-wrap-jobs">
+      <table class="tss-table tss-table-jobs">
+        <thead><tr>
+          <th class="col-id sortable"      data-sort="id">id<span class="sort-ind"></span></th>
+          <th class="col-product sortable" data-sort="product">product<span class="sort-ind"></span></th>
+          <th class="col-status sortable"  data-sort="status">status<span class="sort-ind"></span></th>
+          <th class="col-timeline">timeline</th>
+          <th class="col-when sortable"    data-sort="when">when<span class="sort-ind"></span></th>
+        </tr></thead>
+        <tbody id="jobs-list"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel panel-events">
+    <header class="panel-header">
+      <h2>events</h2>
+      <span class="panel-meta">audit trail</span>
+    </header>
+    <div class="filter-bar">
+      <label class="event-filter">
+        <span>agent</span>
+        <select id="event-agent-filter">
+          <option value="">all</option>
+        </select>
+      </label>
+    </div>
+    <div class="tss-table-wrap tss-table-wrap-events">
+      <table class="tss-table tss-table-events">
+        <thead><tr>
+          <th class="col-when">time</th>
+          <th class="col-kind">kind</th>
+          <th class="col-id">job</th>
+          <th class="col-agent">agent</th>
+          <th class="col-detail">detail</th>
+        </tr></thead>
+        <tbody id="events-list"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <span>samsara · test scheduling service · proof-of-concept</span>
+</footer>
+
+<script src="/static/app.js"></script>
 
 <aside id="job-panel" class="job-panel" hidden>
   <header class="job-panel-header">
@@ -142,5 +144,29 @@
     <pre id="job-panel-raw"></pre>
   </details>
 </aside>
+
+<aside id="agent-panel" class="job-panel" hidden>
+  <header class="job-panel-header">
+    <h2 id="agent-panel-title">Agent</h2>
+    <button id="agent-panel-close" type="button" aria-label="Close">×</button>
+  </header>
+  <section class="job-panel-meta">
+    <div><strong>id</strong><code id="agent-panel-id"></code></div>
+    <div><strong>capabilities</strong><span id="agent-panel-caps"></span></div>
+    <div><strong>status</strong><span id="agent-panel-status"></span></div>
+    <div><strong>epoch</strong><span id="agent-panel-epoch"></span></div>
+    <div><strong>current job</strong><span id="agent-panel-job"></span></div>
+    <div><strong>registered</strong><span id="agent-panel-registered"></span></div>
+    <div><strong>last heartbeat</strong><span id="agent-panel-heartbeat"></span></div>
+  </section>
+  <section class="agent-panel-actions">
+    <button id="agent-panel-kill" class="kill-button" type="button">kill (demo)</button>
+  </section>
+  <section class="job-panel-history">
+    <h3>Events on this agent</h3>
+    <ol id="agent-panel-events"></ol>
+  </section>
+</aside>
+
 </body>
 </html>
