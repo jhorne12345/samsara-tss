@@ -100,3 +100,42 @@ def test_history_round_trips_with_job() -> None:
     assert kinds == ["submitted", "claimed"]
     assert fetched.history[1].agent_name == "vg-01"
     assert fetched.history[1].detail == "attempt=1"
+
+
+def test_update_persists_status_and_new_events() -> None:
+    store = SQLiteJobStore(":memory:")
+    job = _make_job()
+    store.add(job)
+
+    job.status = JobStatus.RUNNING
+    job.attempt_count = 1
+    job.history.append(
+        JobEvent(
+            at=datetime(2026, 5, 6, 10, 0, 30, tzinfo=UTC),
+            kind="claimed",
+            agent_name="vg-01",
+        )
+    )
+    store.update(job)
+
+    fetched = store.get(job.id)
+    assert fetched is not None
+    assert fetched.status == JobStatus.RUNNING
+    assert fetched.attempt_count == 1
+    assert len(fetched.history) == 1
+    assert fetched.history[0].kind == "claimed"
+
+
+def test_update_is_idempotent_for_same_events() -> None:
+    """Calling update() twice with no new events does not duplicate history."""
+    store = SQLiteJobStore(":memory:")
+    job = _make_job()
+    job.history.append(
+        JobEvent(at=datetime(2026, 5, 6, 10, 0, 0, tzinfo=UTC), kind="submitted")
+    )
+    store.add(job)
+    store.update(job)
+    store.update(job)
+    fetched = store.get(job.id)
+    assert fetched is not None
+    assert len(fetched.history) == 1

@@ -164,6 +164,28 @@ class SQLiteJobStore:
             rows,
         )
 
+    def update(self, job: Job) -> None:
+        with self._conn:
+            self._conn.execute(
+                """UPDATE jobs SET
+                   product = ?, status = ?, duration_seconds = ?,
+                   expected_exit_code = ?, crash_at_pct = ?, slow_multiplier = ?,
+                   assigned_agent_id = ?, assigned_agent_epoch = ?,
+                   attempt_count = ?, max_attempts = ?, submitter = ?,
+                   started_at = ?, completed_at = ?
+                   WHERE id = ?""",
+                (
+                    job.product, job.status.value, job.duration_seconds,
+                    job.expected_exit_code, job.crash_at_pct, job.slow_multiplier,
+                    str(job.assigned_agent_id) if job.assigned_agent_id else None,
+                    job.assigned_agent_epoch, job.attempt_count, job.max_attempts,
+                    job.submitter,
+                    self._iso(job.started_at), self._iso(job.completed_at),
+                    str(job.id),
+                ),
+            )
+            self._insert_events(job)
+
     # ----- Reads -----
 
     def get(self, job_id: UUID) -> Job | None:
