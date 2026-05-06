@@ -20,6 +20,7 @@ from tss.server.dispatcher import Dispatcher
 from tss.server.routes import agents as agents_routes
 from tss.server.routes import fleet as fleet_routes
 from tss.server.routes import jobs as jobs_routes
+from tss.server.routes import metrics as metrics_routes
 from tss.server.sqlite_store import SQLiteJobStore
 from tss.server.watchdog import Watchdog
 
@@ -63,6 +64,7 @@ def create_app(
     app.include_router(agents_routes.router)
     app.include_router(jobs_routes.router)
     app.include_router(fleet_routes.router)
+    app.include_router(metrics_routes.router)
 
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
