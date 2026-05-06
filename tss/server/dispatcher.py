@@ -71,7 +71,7 @@ class Dispatcher:
         default_max_attempts: int = JOB_MAX_ATTEMPTS,
     ) -> None:
         self.registry: AgentRegistry = registry or InMemoryAgentRegistry()
-        self.store: JobStore = store or InMemoryJobStore()
+        self.store: JobStore = store if store is not None else InMemoryJobStore()
         self.heartbeat_timeout_s = heartbeat_timeout_s
         self.heartbeat_interval_s = heartbeat_interval_s
         self.poll_interval_s = poll_interval_s
@@ -209,6 +209,7 @@ class Dispatcher:
                     detail=f"attempt={job.attempt_count}",
                 )
             )
+            self.store.update(job)   # persist RUNNING transition
             agent.status = AgentStatus.BUSY
             agent.current_job_id = job.id
             log.info(
@@ -319,6 +320,8 @@ class Dispatcher:
                         )
                     )
                     log.info("job re-queued job=%s after agent failure", job.id)
+
+            self.store.update(job)   # persist the outcome
 
             # Agent is freed regardless of outcome (unless it's still tracking
             # a different job_id, which would indicate state drift).
@@ -451,6 +454,7 @@ class Dispatcher:
                 )
             )
             log.info("job re-queued job=%s reason=%s", job.id, detail)
+        self.store.update(job)   # persist requeue/fail transition
 
     # ----- Demo-only operations -----
 
