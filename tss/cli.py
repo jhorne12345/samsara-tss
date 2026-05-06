@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
 from typing import Annotated
 from uuid import UUID
@@ -162,16 +163,23 @@ def submit_job(
     ] = None,
     slow: Annotated[float, typer.Option(help="Force this slow-multiplier (1.0 = on time).")] = 1.0,
     max_attempts: Annotated[int, typer.Option(help="Retry budget.")] = 3,
+    submitter: Annotated[
+        str,
+        typer.Option(help="Identifier of the submitter. Defaults to $USER."),
+    ] = "",
     dispatcher: Annotated[
         str, typer.Option(help="Dispatcher base URL.")
     ] = f"http://{DEFAULT_HOST}:{DEFAULT_PORT}",
 ) -> None:
     """Submit a single job to the dispatcher."""
+    if not submitter:
+        submitter = os.environ.get("USER", "unknown")
     payload = {
         "product": product,
         "duration_seconds": duration,
         "slow_multiplier": slow,
         "max_attempts": max_attempts,
+        "submitter": submitter,
     }
     if crash_at is not None:
         payload["crash_at_pct"] = crash_at
@@ -179,7 +187,7 @@ def submit_job(
     r.raise_for_status()
     job_id = r.json()["job_id"]
     console.print(
-        f"[green]submitted[/] job [cyan]{job_id}[/] product={product} duration={duration}s"
+        f"[green]submitted[/] job [cyan]{job_id}[/] product={product} duration={duration}s submitter={submitter}"
     )
 
 

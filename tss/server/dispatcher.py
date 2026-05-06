@@ -150,6 +150,7 @@ class Dispatcher:
         crash_at_pct: float | None = None,
         slow_multiplier: float = 1.0,
         max_attempts: int | None = None,
+        submitter: str = "unknown",
     ) -> Job:
         async with self._lock:
             now = clock.utcnow()
@@ -160,12 +161,14 @@ class Dispatcher:
                 crash_at_pct=crash_at_pct,
                 slow_multiplier=slow_multiplier,
                 max_attempts=max_attempts or self.default_max_attempts,
+                submitter=submitter,
                 created_at=now,
                 history=[JobEvent(at=now, kind="submitted", detail=f"product={product}")],
             )
             self.store.add(job)
             log.info(
-                "job submitted id=%s product=%s duration=%s", job.id, product, duration_seconds
+                "job submitted id=%s product=%s duration=%s submitter=%s",
+                job.id, product, duration_seconds, submitter,
             )
             return job
 

@@ -83,6 +83,8 @@ class Job(BaseModel):
     """For demos: agent should crash partway through this fraction of duration."""
     slow_multiplier: float = Field(default=1.0, ge=0.1)
     """For demos: agent should take this many times the declared duration."""
+    submitter: str
+    """Who submitted this job. Honor system; populated by CLI ($USER) or web ui (localStorage)."""
 
     status: JobStatus = JobStatus.QUEUED
     assigned_agent_id: UUID | None = None
@@ -145,6 +147,8 @@ class JobSubmitRequest(BaseModel):
     crash_at_pct: float | None = Field(default=None, ge=0.0, le=1.0)
     slow_multiplier: float = Field(default=1.0, ge=0.1)
     max_attempts: int = Field(default=3, ge=1, le=10)
+    submitter: str = "unknown"
+    """Free-form identifier. Set by CLI (defaults to $USER) or web (localStorage)."""
 
 
 class JobSubmitResponse(BaseModel):

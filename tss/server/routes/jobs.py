@@ -40,6 +40,7 @@ async def submit_job(req: JobSubmitRequest, request: Request) -> JobSubmitRespon
         crash_at_pct=req.crash_at_pct,
         slow_multiplier=req.slow_multiplier,
         max_attempts=req.max_attempts,
+        submitter=req.submitter,
     )
     return JobSubmitResponse(job_id=job.id)
 
