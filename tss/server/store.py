@@ -16,6 +16,7 @@ from tss.common.models import Job, JobStatus
 
 class JobStore(Protocol):
     def add(self, job: Job) -> None: ...
+    def update(self, job: Job) -> None: ...
     def get(self, job_id: UUID) -> Job | None: ...
     def all(self) -> list[Job]: ...
     def by_status(self, status: JobStatus) -> list[Job]: ...
@@ -29,6 +30,13 @@ class InMemoryJobStore:
         self._jobs: dict[UUID, Job] = {}
 
     def add(self, job: Job) -> None:
+        self._jobs[job.id] = job
+
+    def update(self, job: Job) -> None:
+        # In-memory: the Pydantic model the caller mutated is already the
+        # object we hold in self._jobs, so no work to do. The method exists
+        # to satisfy the Protocol so the SQLiteJobStore can persist the
+        # mutation.
         self._jobs[job.id] = job
 
     def get(self, job_id: UUID) -> Job | None:
