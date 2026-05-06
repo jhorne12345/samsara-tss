@@ -181,9 +181,11 @@ CREATE TABLE IF NOT EXISTS job_events (
 
 **Concurrency contract.** Writes serialize at the SQLite connection. The dispatcher's `asyncio.Lock` continues to be the *only* application-level mutex. No `SELECT ... FOR UPDATE`, no row-level locks. The DB is durable storage for state the dispatcher has already serialized.
 
-**Library.** `aiosqlite` (async). Single connection owned by the `SQLiteJobStore` instance. WAL mode enabled.
+**Library.** Stdlib `sqlite3` (sync). Discovered during implementation: the existing `JobStore` Protocol is sync, and SQLite operations are sub-millisecond local I/O — `aiosqlite` would force the Protocol async and cascade through the dispatcher for no real-world benefit. Single connection owned by the `SQLiteJobStore` instance. WAL mode enabled. Zero new dependencies.
 
 **File location.** `./tss.db` by default. CLI flag `--db-path` overrides; `--db-path :memory:` for ephemeral.
+
+**Mutation contract.** The existing dispatcher mutates `Job` objects in place after reading them from the store (the in-memory store works because Python returns references). For SQLite to persist those mutations, we add an explicit `update(job: Job) -> None` method to the `JobStore` Protocol. The dispatcher calls `store.update(job)` after each mutation site. This is the smallest possible change to the existing dispatcher logic — no behavior change, just an explicit write-back call.
 
 ### 7.2 Add `submitter` to `Job`
 
