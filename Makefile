@@ -1,4 +1,4 @@
-.PHONY: install demo demo-plain test test-fast test-chaos lint typecheck format clean
+.PHONY: install demo demo-plain chaos-demo test test-fast test-chaos lint typecheck format clean
 
 PYTHON := .venv/bin/python
 TSS := .venv/bin/tss
@@ -26,6 +26,23 @@ demo-plain:
 	@echo "Dispatcher: http://localhost:$(PORT)"
 	@echo "Logs: .tss/*.log"
 	@echo "Stop with: make demo-stop"
+
+chaos-demo:
+	@mkdir -p .tss
+	@echo "Starting dispatcher on http://localhost:$(PORT)..."
+	@$(TSS) serve --port $(PORT) > .tss/dispatcher.log 2>&1 & echo $$! > .tss/dispatcher.pid
+	@sleep 2
+	@echo "Spawning 10 chaos agents (mixed intensity)..."
+	@$(TSS) chaos --count 10 --intensity mixed > .tss/chaos.log 2>&1 & echo $$! > .tss/chaos.pid
+	@sleep 2
+	@echo "Submitting jobs continuously in the background..."
+	@./scripts/job-dripper.sh > .tss/dripper.log 2>&1 & echo $$! > .tss/dripper.pid
+	@echo ""
+	@echo "Dashboard: http://localhost:$(PORT)"
+	@echo "Logs: .tss/*.log    Stop with: make demo-stop"
+	@if command -v open >/dev/null 2>&1; then open http://localhost:$(PORT); \
+	elif command -v xdg-open >/dev/null 2>&1; then xdg-open http://localhost:$(PORT); \
+	fi
 
 demo-stop:
 	@for pidfile in .tss/*.pid; do \

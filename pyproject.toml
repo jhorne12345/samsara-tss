@@ -60,3 +60,8 @@ markers = [
     "chaos: long-running chaos integration tests (deselect with '-m \"not chaos\"')",
 ]
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "playwright>=1.59.0",
+]
