@@ -65,6 +65,15 @@ async def list_jobs(
     return all_jobs
 
 
+@router.get("/jobs/{job_id}", response_model=Job)
+async def get_job(job_id: UUID, request: Request) -> Job:
+    d = _disp(request)
+    job = d.store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"job={job_id} not found")
+    return job
+
+
 @router.get("/agents/{agent_id}/jobs/next", status_code=status.HTTP_200_OK)
 async def claim_next_job(agent_id: UUID, request: Request) -> Response:
     d = _disp(request)
