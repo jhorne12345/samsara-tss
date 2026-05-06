@@ -50,6 +50,7 @@ async def list_jobs(
     request: Request,
     status_filter: JobStatus | None = None,
     product: str | None = None,
+    submitter: str | None = None,
 ) -> list[Job]:
     d = _disp(request)
     # snapshot_fleet only exposes queue + running; for filtered listing we
@@ -59,6 +60,8 @@ async def list_jobs(
         all_jobs = [j for j in all_jobs if j.status == status_filter]
     if product is not None:
         all_jobs = [j for j in all_jobs if j.product == product]
+    if submitter is not None:
+        all_jobs = [j for j in all_jobs if j.submitter == submitter]
     return all_jobs
 
 
