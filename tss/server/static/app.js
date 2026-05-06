@@ -24,6 +24,7 @@
       /* localStorage disabled — accept and continue */
     }
     refreshIdentityUI();
+    requestNotifyPermission();
   }
 
   function refreshIdentityUI() {
@@ -44,6 +45,7 @@
   // Wire up identity UI on DOM ready
   document.addEventListener("DOMContentLoaded", () => {
     refreshIdentityUI();
+    if (loadSubmitter()) requestNotifyPermission();
     const saveBtn = document.getElementById("identity-save");
     const input = document.getElementById("identity-input");
     if (saveBtn && input) {
@@ -136,6 +138,63 @@
       JSON.stringify(job, null, 2);
   }
 
+  // ---- Completion notifications ----
+  let notifyPermission = "default";
+  const lastJobStatusById = new Map(); // jobId -> previous status
+
+  function requestNotifyPermission() {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "default") {
+      Notification.requestPermission().then((p) => { notifyPermission = p; });
+    } else {
+      notifyPermission = Notification.permission;
+    }
+  }
+
+  function notifyTerminal(job) {
+    const submitter = loadSubmitter();
+    if (!submitter || job.submitter !== submitter) return;
+    const body = job.status === "completed"
+      ? `Job ${job.id.slice(0, 8)} completed`
+      : `Job ${job.id.slice(0, 8)} failed`;
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification("TSS", { body });
+    } else {
+      flashBanner(body);
+    }
+  }
+
+  function flashBanner(message) {
+    const el = document.createElement("div");
+    el.className = "flash-banner";
+    el.textContent = message;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+
+  function checkForCompletions(allJobs) {
+    for (const job of allJobs) {
+      const prev = lastJobStatusById.get(job.id);
+      if (prev && prev !== job.status && (job.status === "completed" || job.status === "failed")) {
+        notifyTerminal(job);
+      }
+      lastJobStatusById.set(job.id, job.status);
+    }
+  }
+
+  async function pollForCompletions() {
+    const submitter = loadSubmitter();
+    if (!submitter) return;
+    try {
+      const resp = await fetch(`/api/jobs?submitter=${encodeURIComponent(submitter)}`);
+      if (!resp.ok) return;
+      const jobs = await resp.json();
+      checkForCompletions(jobs);
+    } catch (e) {
+      /* swallow — best-effort */
+    }
+  }
+
   const POLL_INTERVAL_MS = 1000;
   const els = {
     statIdle: document.getElementById("stat-idle"),
@@ -169,6 +228,7 @@
     } catch (e) {
       setPollStatus("error", `dispatcher unreachable — ${e.message}`);
     }
+    pollForCompletions();
   }
 
   function setPollStatus(kind, msg) {

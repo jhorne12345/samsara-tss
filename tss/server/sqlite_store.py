@@ -124,43 +124,71 @@ class SQLiteJobStore:
         self._next_order += 1
         with self._conn:
             self._conn.execute(
-                """
-                INSERT INTO jobs (
+                """INSERT INTO jobs (
                   id, product, status, duration_seconds, expected_exit_code,
                   crash_at_pct, slow_multiplier, assigned_agent_id,
                   assigned_agent_epoch, attempt_count, max_attempts,
                   submitter, created_at, started_at, completed_at, insertion_order
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    str(job.id),
-                    job.product,
-                    job.status.value,
-                    job.duration_seconds,
-                    job.expected_exit_code,
-                    job.crash_at_pct,
-                    job.slow_multiplier,
+                    str(job.id), job.product, job.status.value,
+                    job.duration_seconds, job.expected_exit_code,
+                    job.crash_at_pct, job.slow_multiplier,
                     str(job.assigned_agent_id) if job.assigned_agent_id else None,
-                    job.assigned_agent_epoch,
-                    job.attempt_count,
-                    job.max_attempts,
+                    job.assigned_agent_epoch, job.attempt_count, job.max_attempts,
                     job.submitter,
-                    self._iso(job.created_at),
-                    self._iso(job.started_at),
-                    self._iso(job.completed_at),
+                    self._iso(job.created_at), self._iso(job.started_at), self._iso(job.completed_at),
                     order,
                 ),
             )
-            # History persistence added in Task 6
+            self._insert_events(job)
+
+    def _insert_events(self, job: Job) -> None:
+        if not job.history:
+            return
+        rows = [
+            (
+                str(job.id),
+                self._iso(e.at),
+                e.kind,
+                str(e.agent_id) if e.agent_id else None,
+                e.agent_name,
+                e.detail,
+            )
+            for e in job.history
+        ]
+        self._conn.executemany(
+            """INSERT OR IGNORE INTO job_events
+               (job_id, at, kind, agent_id, agent_name, detail)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
 
     # ----- Reads -----
 
     def get(self, job_id: UUID) -> Job | None:
-        cursor = self._conn.execute(
-            "SELECT * FROM jobs WHERE id = ?", (str(job_id),)
-        )
+        cursor = self._conn.execute("SELECT * FROM jobs WHERE id = ?", (str(job_id),))
         row = cursor.fetchone()
         if row is None:
             return None
-        # History fetched in Task 6 — for now, empty list.
-        return self._row_to_job(row, events=[])
+        events = self._fetch_events(job_id)
+        return self._row_to_job(row, events=events)
+
+    def _fetch_events(self, job_id: UUID) -> list[JobEvent]:
+        cursor = self._conn.execute(
+            """SELECT at, kind, agent_id, agent_name, detail
+               FROM job_events WHERE job_id = ? ORDER BY at ASC""",
+            (str(job_id),),
+        )
+        events: list[JobEvent] = []
+        for row in cursor.fetchall():
+            events.append(
+                JobEvent(
+                    at=self._parse_iso(row["at"]),  # type: ignore[arg-type]
+                    kind=row["kind"],
+                    agent_id=UUID(row["agent_id"]) if row["agent_id"] else None,
+                    agent_name=row["agent_name"],
+                    detail=row["detail"],
+                )
+            )
+        return events

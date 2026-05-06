@@ -630,3 +630,16 @@ body {
   background: var(--samsara-paper); padding: .75rem; border-radius: 4px;
   font-size: .75rem; overflow-x: auto; margin: 0;
 }
+
+/* ----- Flash banner (notification fallback) ----- */
+
+.flash-banner {
+  position: fixed; top: 1rem; right: 1rem;
+  background: var(--samsara-white);
+  border: 1px solid var(--samsara-fog-deep);
+  border-radius: 4px;
+  padding: .75rem 1rem;
+  box-shadow: 0 4px 12px rgba(15, 41, 68, .1);
+  font-size: .9rem;
+  z-index: 1500;
+}

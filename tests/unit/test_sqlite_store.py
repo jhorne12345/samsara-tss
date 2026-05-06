@@ -75,3 +75,28 @@ def test_get_returns_none_for_unknown_id() -> None:
     from uuid import uuid4
     store = SQLiteJobStore(":memory:")
     assert store.get(uuid4()) is None
+
+
+from tss.common.models import JobEvent
+
+
+def test_history_round_trips_with_job() -> None:
+    store = SQLiteJobStore(":memory:")
+    job = _make_job()
+    job.history = [
+        JobEvent(at=datetime(2026, 5, 6, 10, 0, 1, tzinfo=UTC), kind="submitted"),
+        JobEvent(
+            at=datetime(2026, 5, 6, 10, 0, 5, tzinfo=UTC),
+            kind="claimed",
+            agent_name="vg-01",
+            detail="attempt=1",
+        ),
+    ]
+    store.add(job)
+    fetched = store.get(job.id)
+    assert fetched is not None
+    assert len(fetched.history) == 2
+    kinds = [e.kind for e in fetched.history]
+    assert kinds == ["submitted", "claimed"]
+    assert fetched.history[1].agent_name == "vg-01"
+    assert fetched.history[1].detail == "attempt=1"
