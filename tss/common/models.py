@@ -170,6 +170,24 @@ class FleetStatusResponse(BaseModel):
     agents: list[Agent]
     queue: list[Job]
     running_jobs: list[Job]
+    recent_completed: list[Job] = Field(default_factory=list)
+    """Most recently terminal jobs (completed or failed), newest first."""
     recent_events: list[dict[str, object]]
     """Recent events flattened across all jobs, newest first."""
     stats: FleetStats
+
+
+class AgentHistoryEvent(BaseModel):
+    """A single job-level event filtered to one agent for the history view."""
+
+    at: datetime
+    kind: JobEventKind
+    job_id: UUID
+    product: str
+    detail: str | None = None
+
+
+class AgentHistoryResponse(BaseModel):
+    agent: Agent
+    events: list[AgentHistoryEvent]
+    """Events touching this agent, newest first."""

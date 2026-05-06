@@ -482,6 +482,14 @@ class Dispatcher:
             jobs = self.store.all()
             queue = [j for j in jobs if j.status == JobStatus.QUEUED]
             running = [j for j in jobs if j.status == JobStatus.RUNNING]
+            terminal = [
+                j for j in jobs
+                if j.status in (JobStatus.COMPLETED, JobStatus.FAILED)
+            ]
+            terminal.sort(
+                key=lambda j: j.completed_at or j.created_at, reverse=True,
+            )
+            recent_completed = terminal[:20]
 
             recent: list[dict[str, object]] = []
             for j in jobs:
@@ -492,6 +500,8 @@ class Dispatcher:
                             "kind": ev.kind,
                             "job_id": str(j.id),
                             "product": j.product,
+                            "submitter": j.submitter,
+                            "agent_id": str(ev.agent_id) if ev.agent_id else None,
                             "agent_name": ev.agent_name,
                             "detail": ev.detail,
                         }
@@ -513,6 +523,7 @@ class Dispatcher:
                 agents=agents,
                 queue=queue,
                 running_jobs=running,
+                recent_completed=recent_completed,
                 recent_events=recent,
                 stats=stats,
             )

@@ -8,6 +8,8 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from tss.common.models import (
     Agent,
+    AgentHistoryEvent,
+    AgentHistoryResponse,
     HeartbeatRequest,
     RegisterRequest,
     RegisterResponse,
@@ -63,3 +65,28 @@ async def list_agents(request: Request) -> list[Agent]:
     d = _disp(request)
     snap = await d.snapshot_fleet()
     return snap.agents
+
+
+@router.get("/{agent_id}/history", response_model=AgentHistoryResponse)
+async def agent_history(agent_id: UUID, request: Request) -> AgentHistoryResponse:
+    d = _disp(request)
+    agent = d.registry.get(agent_id)
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"agent={agent_id} not found"
+        )
+    events: list[AgentHistoryEvent] = []
+    for job in d.store:
+        for e in job.history:
+            if e.agent_id == agent_id:
+                events.append(
+                    AgentHistoryEvent(
+                        at=e.at,
+                        kind=e.kind,
+                        job_id=job.id,
+                        product=job.product,
+                        detail=e.detail,
+                    )
+                )
+    events.sort(key=lambda x: x.at, reverse=True)
+    return AgentHistoryResponse(agent=agent, events=events)
