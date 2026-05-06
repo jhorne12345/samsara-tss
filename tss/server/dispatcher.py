@@ -52,7 +52,7 @@ from tss.server.errors import (
 )
 from tss.server.registry import AgentRegistry, InMemoryAgentRegistry
 from tss.server.sqlite_store import SQLiteJobStore
-from tss.server.store import InMemoryJobStore, JobStore
+from tss.server.store import JobStore
 
 log = logging.getLogger(__name__)
 

@@ -14,12 +14,12 @@ import pytest
 from tss.common.models import Job
 from tss.server.dispatcher import Dispatcher
 from tss.server.registry import InMemoryAgentRegistry
-from tss.server.store import InMemoryJobStore
+from tss.server.sqlite_store import SQLiteJobStore
 
 
-class CountingStore(InMemoryJobStore):
+class CountingStore(SQLiteJobStore):
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(":memory:")
         self.update_calls: list[UUID] = []
 
     def update(self, job: Job) -> None:
