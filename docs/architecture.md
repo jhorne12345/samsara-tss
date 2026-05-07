@@ -23,12 +23,12 @@ Operators submit firmware test jobs, each tagged with a required product (e.g. `
 | Concurrency | `asyncio` (single process) | One event loop, one `asyncio.Lock`. No threads, no multiprocessing. |
 | HTTP client (agents) | `httpx` (async) | Mirrors the server stack so we don't mix sync/async. |
 | CLI | Typer + Rich | Typer for the command tree, Rich for nicely formatted tables (`tss agents`, `tss jobs`). |
-| Dashboard | Plain HTML + CSS + vanilla JS | No build step. Polls `/api/fleet/status` once a second. Lives in `tss/server/static/`. |
+| Dashboard | Plain HTML + CSS + vanilla JS (ES2020+) | No build step, no JS deps. Two role-scoped views (engineer / operator) toggled in the topbar; slide-over panels for job and agent detail; an inline "demo strip" at the top of the operator view that triggers each failure mode on demand. Polls `/api/fleet/status` once a second. Lives in `tss/server/static/`. |
 | Storage | SQLite (stdlib `sqlite3`, WAL mode) via `SQLiteJobStore`; `InMemoryAgentRegistry` for agents | Jobs and their full event history survive restarts. `:memory:` mode in tests for zero I/O overhead. Swappable for Postgres at scale via the `JobStore` Protocol. |
 | Tests | pytest + pytest-asyncio + Hypothesis | The race-condition tests are integration-flavored; Hypothesis is used for property-based fuzzing of the dispatcher state machine. |
 | Linters | ruff (lint + format), mypy --strict | Strict typing required for `tss/`. |
 | Packaging | uv + hatchling | `uv sync --extra dev` for a one-step install. |
-| Demo runner | Make + tmux | `make demo` opens a tmux session with dispatcher + 5 mock rigs + an operator REPL. |
+| Demo runner | Make + tmux | `make demo` opens a tmux session with dispatcher + 5 mock rigs + an operator REPL. The operator dashboard also embeds a one-click chaos-storm trigger that spawns local agent subprocesses with mixed failure profiles. |
 
 ---
 
@@ -105,13 +105,20 @@ classDiagram
         list~str~ capabilities
         AgentStatus status (idle|busy|offline)
         int epoch
+        datetime epoch_started_at
+        int jobs_claimed
+        int jobs_completed
+        int jobs_failed
         float last_heartbeat_mono
         UUID? current_job_id
+        list~EpochSummary~ epoch_history
     }
     class Job {
         UUID id
         str product
         str submitter
+        str? branch
+        str? commit
         float duration_seconds
         JobStatus status (queued|running|completed|failed)
         UUID? assigned_agent_id
@@ -124,16 +131,30 @@ classDiagram
         datetime at
         JobEventKind kind (submitted|claimed|completed|failed|reassigned|overrun|stale_result_rejected)
         UUID? agent_id
+        str? agent_name
         str? detail
+    }
+    class EpochSummary {
+        int epoch
+        datetime started_at
+        datetime? ended_at
+        str? reason_ended (manual_reregister|post_offline|killed_by_operator)
+        int jobs_claimed
+        int jobs_completed
+        int jobs_failed
     }
     Job "1" --> "many" JobEvent : history
     Job ..> Agent : assigned_agent_id
+    Agent "1" --> "many" EpochSummary : epoch_history
 ```
 
 A few fields earn their keep:
 
 - `Agent.epoch` — incremented every time an agent (re-)registers. The "version number" we stamp on every job claim.
+- `Agent.epoch_history` — the dashboard's agent slide-over renders these as bands so a reviewer can *see* that each (re-)registration is its own window with a reason for ending. Capped at `EPOCH_HISTORY_CAP=50`.
+- `Agent.jobs_claimed/completed/failed` — per-current-epoch counters; reset on re-registration. The previous epoch's totals are captured into the appended `EpochSummary` first.
 - `Job.assigned_agent_epoch` — captured at claim time. Used to reject late results from a previous incarnation of the agent.
+- `Job.branch / Job.commit` — optional metadata an operator can attach to a submission; the engineer-view "my build" hero shows them next to the status pill so a firmware engineer can see at a glance which branch is on which testbed.
 - `Job.history` — every transition is appended here as a `JobEvent`. The dashboard's "Recent events" panel is built from this list. Cheap to add; it's the visibility surface for resiliency.
 
 ---
@@ -230,13 +251,13 @@ That includes:
 
 | Operation | Method | Why it needs the lock |
 |---|---|---|
-| Register / re-register an agent | `register` | Bumps epoch, replaces agent record. |
+| Register / re-register an agent | `register` | Bumps epoch, captures previous epoch into `epoch_history`, resets per-epoch counters, replaces agent record. Rejects with `AgentQuarantinedError` if the name is in a kill quarantine. |
 | Heartbeat | `heartbeat` | Writes timestamps; checks epoch. |
 | Submit a job | `submit_job` | Adds to the store. |
 | Claim a job | `claim_next_job` | Find-and-assign must be atomic. |
-| Report a result | `report_result` | Multi-field state machine transition. |
+| Report a result | `report_result` | Multi-field state machine transition. Bumps the agent's per-epoch counters and the throughput ring buffer. |
 | Watchdog tick | `reap_stale_agents` | Scans both registry and store, mutates both. |
-| Force-kill (demo button) | `force_kill_agent` | Same as offline + epoch bump. |
+| Force-kill (demo button) | `force_kill_agent` | Marks offline, requeues current job, bumps epoch, sets a per-name `KILL_QUARANTINE_S` deadline so the agent runner cannot immediately re-register and erase the visible offline state. |
 
 The lock is held only for the duration of a state change — microseconds. **Nothing awaits anything other than the lock itself inside a critical section.** This keeps lock-hold time bounded and rules out lock-order inversions.
 
@@ -260,6 +281,25 @@ That's the entire resiliency story.
 
 ---
 
+## Demo affordances (operator dashboard)
+
+The operator-view dashboard is also the live-demo surface. It includes a small set of "demo only" routes (under `/api/demo`) that orchestrate local agent subprocesses so a presenter can drive the entire failure-mode story without leaving the browser.
+
+| Route | Purpose |
+|---|---|
+| `POST /api/demo/agents/spawn` | Launch a local `tss agent` subprocess that registers with this dispatcher. Caller picks name, capabilities, and chaos profile. PIDs are tracked on `app.state.demo_pids`. |
+| `POST /api/demo/agents/spawn-random` | Convenience — random capabilities, stable profile. |
+| `POST /api/demo/agents/{id}/revive` | Clear an agent's kill quarantine so the runner's next register attempt succeeds. The dashboard's per-tile `↻ revive` button calls this. |
+| `POST /api/demo/chaos-storm/start` | Spawn 8 mixed-profile agents (stable / flaky / crashy / doomed × 2 each) and start an asyncio drip task that submits jobs every 1.2–2.8s. Exercises every failure mode the assessment calls out. |
+| `POST /api/demo/chaos-storm/stop` | Cancel the drip task and SIGTERM the spawned subprocesses. Idempotent. |
+| `GET /api/demo/chaos-storm` | Status (running, list of spawned names) so the dashboard can sync the toggle button after a reload. |
+
+The kill quarantine + 423 backoff is what makes the kill demo legible: without it, the agent's runner re-registers within a heartbeat cycle and the tile flips back to green before the watchdog has logged the reassignment. With it, the killed tile stays red for `KILL_QUARANTINE_S=30` seconds (or until the user clicks `↻ revive`), giving the audience time to see the reassigned job claimed by another testbed and the epoch tick on revive.
+
+These routes are scoped under `/api/demo` so the path itself is the trust boundary — they should never be exposed beyond localhost.
+
+---
+
 ## Project layout
 
 ```
@@ -277,11 +317,15 @@ tss/
 │   ├── sqlite_store.py # SQLiteJobStore — canonical impl (stdlib sqlite3, WAL)
 │   ├── errors.py       # typed exceptions mapped to HTTP status codes
 │   ├── routes/         # HTTP routes — thin shells over the dispatcher
-│   │   ├── agents.py
-│   │   ├── jobs.py     # includes GET /api/jobs/{id} and ?submitter= filter
-│   │   ├── fleet.py
-│   │   └── metrics.py  # /metrics — Prometheus text format, zero deps
-│   └── static/         # dashboard HTML/CSS/JS
+│   │   ├── agents.py   # /api/agents — register/heartbeat/kill, list, /{id}/history
+│   │   ├── jobs.py     # /api/jobs — submit/list/get; submitter + status + product filters
+│   │   ├── fleet.py    # /api/fleet/status — dashboard snapshot
+│   │   ├── metrics.py  # /metrics — Prometheus text format, zero deps
+│   │   └── demo.py     # /api/demo — spawn agent subprocesses, revive killed agents,
+│   │                   #            chaos-storm start/stop. Demo-only, never expose
+│   │                   #            beyond localhost.
+│   └── static/         # dashboard HTML/CSS/JS — engineer + operator views, slide-overs,
+│                       # demo strip, all in plain ES2020+ (no build step)
 ├── agent/
 │   ├── runner.py       # mock agent — register, heartbeat, poll, report
 │   └── chaos.py        # failure profiles for the chaos demo
