@@ -176,6 +176,12 @@ code, pre, .mono { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
   padding: 22px 28px;
   min-height: 0;
 }
+/* Reserve right-edge space for the floating demo panel so it doesn't
+   cover the rightmost column (e.g. the completed list). At narrow
+   viewports we drop the reservation and let the demo panel overlap. */
+@media (min-width: 1200px) {
+  #dash-main { padding-right: 320px; }
+}
 .view {
   display: flex;
   flex-direction: column;
@@ -275,6 +281,14 @@ code, pre, .mono { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 }
 .hero-row {
   display: flex; justify-content: space-between; align-items: flex-start; gap: 24px;
+}
+.hero-top {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-bottom: 18px;
+}
+.hero-kpis {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 24px; flex-wrap: wrap;
 }
 .hero-eyebrow {
   font-size: 10px;
@@ -443,6 +457,9 @@ code, pre, .mono { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 .kpi-group {
   display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
 }
+.kpi-group-left { align-items: flex-start; }
+.kpi-group-left .kpi-group-label { padding-right: 0; padding-left: 14px; }
+.kpi-group-left .kpi-strip { justify-content: flex-start; }
 .kpi-group-label {
   font-size: 9.5px;
   color: var(--text-dim);
@@ -627,9 +644,42 @@ code, pre, .mono { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
   font-size: 12px;
 }
 .row-grid:first-child { border-top: none; }
-.row-grid.running { grid-template-columns: 80px 1fr auto auto; }
-.row-grid.queue   { grid-template-columns: 24px 80px 1fr auto auto; }
-.row-grid.event   { grid-template-columns: 90px 110px 100px 120px 1fr; }
+.row-grid.running   { grid-template-columns: 70px 1fr auto; }
+.row-grid.queue     { grid-template-columns: 22px 70px 1fr auto; }
+.row-grid.completed { grid-template-columns: 70px auto 1fr auto; }
+.row-grid.event     { grid-template-columns: 90px 110px 100px 120px 1fr; }
+
+/* ===== Lifecycle row: queue | running | completed =====
+   Mirrors the job lifecycle so a viewer can read left-to-right and
+   see what's coming in, what's working now, and what just finished. */
+
+.lifecycle-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 18px;
+  align-items: stretch;
+}
+.lifecycle-row .tss-section {
+  min-width: 0;
+  display: flex; flex-direction: column;
+  max-height: 460px;
+}
+/* The non-header child of each lifecycle section is the row list.
+   Lock its height so each column scrolls independently — the page
+   scroll handles overall flow, the column scrolls handle long lists. */
+.lifecycle-row .tss-section > :not(.tss-section-head) {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+@media (max-width: 1300px) {
+  .lifecycle-row { grid-template-columns: 1fr 1fr; }
+  .lifecycle-row > :nth-child(3) { grid-column: 1 / -1; }
+}
+@media (max-width: 900px) {
+  .lifecycle-row { grid-template-columns: 1fr; }
+  .lifecycle-row > :nth-child(3) { grid-column: auto; }
+}
 
 .row-id {
   background: transparent;
@@ -1112,10 +1162,12 @@ code, pre, .mono { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 }
 .demo-btn:hover { background: var(--bg-card-hi); border-color: var(--accent); }
 .demo-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.demo-btn.warn  { color: #ffd784; }
-.demo-btn.warn:hover  { border-color: var(--status-busy); }
+.demo-btn.warn   { color: #ffd784; }
+.demo-btn.warn:hover   { border-color: var(--status-busy); }
 .demo-btn.danger { color: #ff8d8d; }
 .demo-btn.danger:hover { border-color: var(--status-offline); }
+.demo-btn.live   { color: #7fece0; }
+.demo-btn.live:hover   { border-color: var(--status-live); }
 .demo-toast {
   margin-top: 4px;
   padding: 6px 8px;

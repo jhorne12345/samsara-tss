@@ -171,8 +171,33 @@
   // ===== Render orchestration =====
 
   function renderAll(snap) {
+    // Each poll rebuilds the active view's DOM, which would otherwise reset
+    // scroll position to the top whenever the page height contracts mid-render.
+    // Capture window scroll + per-section internal scroll, then restore.
+    const winY = window.scrollY;
+    const sectionScrolls = new Map();
+    for (const sec of document.querySelectorAll(".tss-section")) {
+      const body = sec.children[1];
+      if (body && body.scrollTop) {
+        const head = sec.querySelector(".tss-section-head h2");
+        if (head) sectionScrolls.set(head.textContent, body.scrollTop);
+      }
+    }
+
     if (state.role === "operator") renderOperator(snap);
     else renderEngineer(snap);
+
+    requestAnimationFrame(() => {
+      window.scrollTo(0, winY);
+      for (const sec of document.querySelectorAll(".tss-section")) {
+        const head = sec.querySelector(".tss-section-head h2");
+        const body = sec.children[1];
+        if (head && body) {
+          const prev = sectionScrolls.get(head.textContent);
+          if (prev) body.scrollTop = prev;
+        }
+      }
+    });
   }
 
   // ----- Section primitive -----
@@ -478,13 +503,39 @@
 
     root.appendChild(fleetHero(snap));
     root.appendChild(fleetGridSection(snap.agents || []));
-    root.appendChild(el("div", {
-      style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" },
-    }, [
-      runningTable(snap.running_jobs || []),
+    // Job lifecycle, left-to-right: queued → running → completed.
+    root.appendChild(el("div", { class: "lifecycle-row" }, [
       queueTable(snap.queue || []),
+      runningTable(snap.running_jobs || []),
+      completedTable(snap.recent_completed || []),
     ]));
     root.appendChild(eventStrip(snap.recent_events || []));
+  }
+
+  function completedTable(rows) {
+    const body = rows.length === 0
+      ? el("div", {}, [el("p", { class: "empty-row" }, "no completed jobs yet.")])
+      : el("div", {}, rows.map(renderCompletedRow));
+    return tssSection({
+      label: "completed",
+      meta: `${rows.length} most recent`,
+      aside: [el("span", {}, "newest first")],
+    }, body);
+  }
+
+  function renderCompletedRow(j) {
+    const ag = lastAgentName(j) || (j.assigned_agent_id ? assignedAgentName(j) : null);
+    const attempts = (j.attempt_count || 1) > 1 ? ` · ${j.attempt_count} attempts` : "";
+    return el("div", { class: "row-grid completed" }, [
+      el("button", { class: "row-id", onclick: () => openJobPanel(j.id) }, shortId(j.id)),
+      pill(j.status),
+      el("div", { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 } }, [
+        el("span", { class: "row-product" }, j.product),
+        el("span", { class: "row-when" },
+          ag ? `on ${ag}${attempts}` : `${durationActual(j)}${attempts}`),
+      ]),
+      el("span", { class: "row-when" }, j.completed_at ? relTime(j.completed_at) : "—"),
+    ]);
   }
 
   function fleetHero(snap) {
@@ -513,42 +564,38 @@
     requestAnimationFrame(() => drawSparkline(sparkCanvas, series, color));
 
     const completed = stats.jobs_completed || 0;
-    const kpiBlock = el("div", { class: "kpi-stack" }, [
-      el("div", { class: "kpi-group" }, [
-        el("span", { class: "kpi-group-label" }, "testbeds"),
-        el("div", { class: "kpi-strip" }, [
-          kpi("total",   stats.total_agents || 0),
-          kpi("busy",    stats.busy || 0,    stats.busy ? "warn" : null),
-          kpi("idle",    stats.idle || 0,    stats.idle ? "live" : null),
-          kpi("offline", offline,            offline ? "fail" : null),
-        ]),
+    const testbedGroup = el("div", { class: "kpi-group kpi-group-left" }, [
+      el("span", { class: "kpi-group-label" }, "testbeds"),
+      el("div", { class: "kpi-strip" }, [
+        kpi("total",   stats.total_agents || 0),
+        kpi("busy",    stats.busy || 0,    stats.busy ? "warn" : null),
+        kpi("idle",    stats.idle || 0,    stats.idle ? "live" : null),
+        kpi("offline", offline,            offline ? "fail" : null),
       ]),
-      el("div", { class: "kpi-group" }, [
-        el("span", { class: "kpi-group-label" }, "jobs"),
-        el("div", { class: "kpi-strip" }, [
-          kpi("queue",   stats.queue_depth || 0),
-          kpi("running", stats.jobs_running || 0),
-          kpi("done",    completed,           completed ? "live" : null),
-          kpi("failed",  failed,              failed ? "fail" : null),
-          el("div", { class: "spark" }, [
-            el("span", { class: "kpi-label" }, "throughput / min"),
-            sparkCanvas,
-            el("span", { class: "spark-foot" }, `last 12 min · ${series[series.length - 1]} /min`),
-          ]),
+    ]);
+    const jobsGroup = el("div", { class: "kpi-group" }, [
+      el("span", { class: "kpi-group-label" }, "jobs"),
+      el("div", { class: "kpi-strip" }, [
+        kpi("queue",   stats.queue_depth || 0),
+        kpi("running", stats.jobs_running || 0),
+        kpi("done",    completed,           completed ? "live" : null),
+        kpi("failed",  failed,              failed ? "fail" : null),
+        el("div", { class: "spark" }, [
+          el("span", { class: "kpi-label" }, "throughput / min"),
+          sparkCanvas,
+          el("span", { class: "spark-foot" }, `last 12 min · ${series[series.length - 1]} /min`),
         ]),
       ]),
     ]);
 
     return el("section", { class: "hero" }, [
       el("div", { class: "hero-accent", style: { background: color } }),
-      el("div", { class: "hero-row" }, [
-        el("div", {}, [
-          el("span", { class: "hero-eyebrow" }, "fleet status"),
-          el("h1", { class: "hero-headline" }, headline),
-          el("p", { class: "hero-sub" }, blurb),
-        ]),
-        kpiBlock,
+      el("div", { class: "hero-top" }, [
+        el("span", { class: "hero-eyebrow" }, "fleet status"),
+        el("h1", { class: "hero-headline" }, headline),
+        el("p", { class: "hero-sub" }, blurb),
       ]),
+      el("div", { class: "hero-kpis" }, [testbedGroup, jobsGroup]),
     ]);
   }
 
@@ -645,8 +692,7 @@
       el("button", {
         class: "row-agent",
         onclick: () => j.assigned_agent_id && openAgentPanel(j.assigned_agent_id),
-      }, j.assigned_agent_id ? `on ${assignedAgentName(j) || shortId(j.assigned_agent_id)}` : "—"),
-      el("span", { class: "row-when" }, j.started_at ? relTime(j.started_at) : "—"),
+      }, j.assigned_agent_id ? (assignedAgentName(j) || shortId(j.assigned_agent_id)) : "—"),
     ]);
   }
 
@@ -661,8 +707,10 @@
     return el("div", { class: "row-grid queue" }, [
       el("span", { class: "row-num" }, String(i + 1)),
       el("button", { class: "row-id", onclick: () => openJobPanel(j.id) }, shortId(j.id)),
-      el("span", { class: "row-product" }, j.product),
-      el("span", { class: "row-when" }, `by ${j.submitter || "unknown"}`),
+      el("div", { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 } }, [
+        el("span", { class: "row-product" }, j.product),
+        el("span", { class: "row-when" }, `by ${j.submitter || "unknown"}`),
+      ]),
       el("span", { class: "row-when" }, relTime(j.created_at)),
     ]);
   }
@@ -1117,6 +1165,26 @@
         showToast(`killed ${victim.name} · watch its job re-queue`);
         poll();
       } catch (e) { showToast(`kill failed: ${e.message || e}`, true); }
+      return;
+    }
+
+    if (action.startsWith("spawn-")) {
+      const caps =
+        action === "spawn-vg"    ? ["vehicle_gateway"] :
+        action === "spawn-ag"    ? ["asset_gateway"] :
+        action === "spawn-combo" ? ["vehicle_gateway", "asset_gateway"] :
+                                   ["vehicle_gateway"];
+      try {
+        const r = await fetch("/api/demo/agents/spawn", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ capabilities: caps, profile: "stable" }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const body = await r.json();
+        showToast(`spawned ${body.name} (${caps.join("+")}) · pid ${body.pid}`);
+        poll();
+      } catch (e) { showToast(`spawn failed: ${e.message || e}`, true); }
       return;
     }
 
