@@ -44,9 +44,10 @@
 
 * { box-sizing: border-box; }
 
-html, body { margin: 0; padding: 0; height: 100%; }
-
+html, body { margin: 0; padding: 0; }
+html { min-height: 100%; }
 body {
+  min-height: 100vh;
   font-family: 'IBM Plex Sans', system-ui, sans-serif;
   font-size: 14px;
   color: var(--text);
@@ -430,12 +431,32 @@ code, pre, .mono { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
   transition: width 400ms;
 }
 
-/* ===== Operator KPI strip ===== */
+/* ===== Operator KPI strip =====
+   Stacked into two labelled groups: testbed-state metrics on top, job-flow
+   metrics on the bottom. The grouping makes it easier to read the hero at
+   a glance — you don't have to scan eight tiles to find queue depth. */
 
+.kpi-stack {
+  display: flex; flex-direction: column; gap: 12px;
+  align-items: flex-end;
+}
+.kpi-group {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+}
+.kpi-group-label {
+  font-size: 9.5px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-weight: 600;
+  padding-right: 14px;
+}
 .kpi-strip {
   display: flex; align-items: stretch; flex-wrap: wrap;
   border-radius: 6px; row-gap: 10px;
   justify-content: flex-end;
+  border: 1px solid rgba(31, 53, 89, 0.5);
+  background: rgba(10, 20, 34, 0.5);
 }
 .kpi {
   display: flex; flex-direction: column; gap: 2px;
@@ -1010,6 +1031,106 @@ code, pre, .mono { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 .tss-section::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
 .slide-over-body::-webkit-scrollbar-thumb:hover,
 .tss-section::-webkit-scrollbar-thumb:hover { background: var(--line-soft); }
+
+/* ===== Demo panel (failure-mode triggers) =====
+   Bottom-right floating card. Lets a presenter trigger each failure mode
+   on demand and watch it propagate through the events feed.            */
+
+.demo-panel {
+  position: fixed;
+  right: 18px;
+  bottom: 48px;
+  width: 280px;
+  background: var(--bg-card);
+  border: 1px solid rgba(92, 224, 210, 0.30);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  z-index: 50;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-mute);
+}
+.demo-panel.collapsed .demo-panel-body { display: none; }
+.demo-panel.collapsed { width: auto; }
+.demo-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-card-hi);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+.demo-panel.collapsed .demo-panel-head { border-bottom: none; }
+.demo-panel-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+  font-weight: 600;
+}
+.demo-collapse {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-mute);
+  width: 22px; height: 22px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 14px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.demo-collapse:hover { color: var(--text); }
+.demo-panel-body {
+  padding: 10px 12px 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.demo-hint {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+.demo-row {
+  display: flex; flex-direction: column; gap: 5px;
+}
+.demo-row-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-dim);
+}
+.demo-btn {
+  background: var(--bg-deep);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 6px 10px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 130ms, border-color 130ms;
+}
+.demo-btn:hover { background: var(--bg-card-hi); border-color: var(--accent); }
+.demo-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.demo-btn.warn  { color: #ffd784; }
+.demo-btn.warn:hover  { border-color: var(--status-busy); }
+.demo-btn.danger { color: #ff8d8d; }
+.demo-btn.danger:hover { border-color: var(--status-offline); }
+.demo-toast {
+  margin-top: 4px;
+  padding: 6px 8px;
+  font-size: 10.5px;
+  border-radius: 3px;
+  background: rgba(92, 224, 210, 0.08);
+  border: 1px solid rgba(92, 224, 210, 0.3);
+  color: var(--text);
+  animation: fade-in 0.15s ease-out;
+}
+.demo-toast.error {
+  background: rgba(255, 107, 107, 0.08);
+  border-color: rgba(255, 107, 107, 0.3);
+  color: #ff8d8d;
+}
 
 /* ===== Flash banner (notification fallback) ===== */
 

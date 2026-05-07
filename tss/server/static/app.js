@@ -512,17 +512,30 @@
     const sparkCanvas = el("canvas", { width: 160, height: 28 });
     requestAnimationFrame(() => drawSparkline(sparkCanvas, series, color));
 
-    const kpiBlock = el("div", { class: "kpi-strip" }, [
-      kpi("testbeds", stats.total_agents || 0),
-      kpi("busy",     stats.busy || 0,     stats.busy ? "warn" : null),
-      kpi("idle",     stats.idle || 0,     stats.idle ? "live" : null),
-      kpi("offline",  offline,             offline ? "fail" : null),
-      kpi("queue",    stats.queue_depth || 0),
-      kpi("running",  stats.jobs_running || 0),
-      el("div", { class: "spark" }, [
-        el("span", { class: "kpi-label" }, "throughput / min"),
-        sparkCanvas,
-        el("span", { class: "spark-foot" }, `last 12 min · ${series[series.length - 1]} /min`),
+    const completed = stats.jobs_completed || 0;
+    const kpiBlock = el("div", { class: "kpi-stack" }, [
+      el("div", { class: "kpi-group" }, [
+        el("span", { class: "kpi-group-label" }, "testbeds"),
+        el("div", { class: "kpi-strip" }, [
+          kpi("total",   stats.total_agents || 0),
+          kpi("busy",    stats.busy || 0,    stats.busy ? "warn" : null),
+          kpi("idle",    stats.idle || 0,    stats.idle ? "live" : null),
+          kpi("offline", offline,            offline ? "fail" : null),
+        ]),
+      ]),
+      el("div", { class: "kpi-group" }, [
+        el("span", { class: "kpi-group-label" }, "jobs"),
+        el("div", { class: "kpi-strip" }, [
+          kpi("queue",   stats.queue_depth || 0),
+          kpi("running", stats.jobs_running || 0),
+          kpi("done",    completed,           completed ? "live" : null),
+          kpi("failed",  failed,              failed ? "fail" : null),
+          el("div", { class: "spark" }, [
+            el("span", { class: "kpi-label" }, "throughput / min"),
+            sparkCanvas,
+            el("span", { class: "spark-foot" }, `last 12 min · ${series[series.length - 1]} /min`),
+          ]),
+        ]),
       ]),
     ]);
 
@@ -640,7 +653,7 @@
   function queueTable(rows) {
     const body = rows.length === 0
       ? el("div", {}, [el("p", { class: "empty-row" }, "queue is clear.")])
-      : el("div", {}, rows.slice(0, 6).map((j, i) => renderQueueRow(j, i)));
+      : el("div", {}, rows.map((j, i) => renderQueueRow(j, i)));
     return tssSection({ label: "queue", meta: `${rows.length} waiting` }, body);
   }
 
@@ -659,9 +672,9 @@
   function eventStrip(events) {
     const body = events.length === 0
       ? el("div", {}, [el("p", { class: "empty-row" }, "no events yet.")])
-      : el("div", {}, events.slice(0, 12).map(renderEventRow));
+      : el("div", {}, events.map(renderEventRow));
     return tssSection({
-      label: "events", meta: "audit trail",
+      label: "events", meta: `${events.length} recent`,
       aside: [el("span", {}, "newest first")],
     }, body);
   }
@@ -1048,6 +1061,94 @@
     setTimeout(() => b.remove(), 4000);
   }
 
+  // ===== Demo panel — on-demand failure-mode triggers =====
+
+  /** Each handler submits a job tuned to demonstrate one failure mode, or
+   *  kills an agent to demonstrate disconnect-driven reassignment. The
+   *  configured durations + crash points are short on purpose — a presenter
+   *  shouldn't have to wait more than ~10s to see the watchdog react. */
+  const DEMO_ACTIONS = {
+    "submit-normal-vg": {
+      label: "submit normal vg",
+      payload: { product: "vehicle_gateway", duration_seconds: 4, max_attempts: 3, slow_multiplier: 1.0 },
+    },
+    "submit-normal-ag": {
+      label: "submit normal ag",
+      payload: { product: "asset_gateway", duration_seconds: 4, max_attempts: 3, slow_multiplier: 1.0 },
+    },
+    "submit-crashing": {
+      label: "submit crashing job",
+      payload: {
+        product: "vehicle_gateway", duration_seconds: 6, max_attempts: 3,
+        crash_at_pct: 0.5,
+      },
+      hint: "watch: claimed → fails at 50% → re-queued → retried (up to max_attempts).",
+    },
+    "submit-overrun": {
+      label: "submit overrunning job",
+      payload: {
+        product: "vehicle_gateway", duration_seconds: 3, max_attempts: 3,
+        slow_multiplier: 5.0,
+      },
+      hint: "watch: claimed → watchdog kills at ~9s (3× declared) → re-queued.",
+    },
+  };
+
+  async function fireDemo(action) {
+    const toast = document.getElementById("demo-toast");
+    const showToast = (msg, isError = false) => {
+      toast.textContent = msg;
+      toast.classList.toggle("error", !!isError);
+      toast.hidden = false;
+      setTimeout(() => { toast.hidden = true; }, 3200);
+    };
+
+    if (action === "kill-random") {
+      const snap = state.lastSnapshot;
+      const candidates = (snap?.agents || []).filter(a => a.status !== "offline");
+      if (candidates.length === 0) {
+        showToast("no live agents to kill", true);
+        return;
+      }
+      const victim = candidates[Math.floor(Math.random() * candidates.length)];
+      try {
+        const r = await fetch(`/api/agents/${victim.id}/kill`, { method: "POST" });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        showToast(`killed ${victim.name} · watch its job re-queue`);
+        poll();
+      } catch (e) { showToast(`kill failed: ${e.message || e}`, true); }
+      return;
+    }
+
+    const def = DEMO_ACTIONS[action];
+    if (!def) return;
+    const payload = { ...def.payload, submitter: loadIdentity() || "demo" };
+    try {
+      const r = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const body = await r.json();
+      showToast(def.hint || `submitted job ${shortId(body.job_id)}`);
+      poll();
+    } catch (e) { showToast(`submit failed: ${e.message || e}`, true); }
+  }
+
+  function wireDemoPanel() {
+    const panel = document.getElementById("demo-panel");
+    if (!panel) return;
+    document.getElementById("demo-collapse").addEventListener("click", () => {
+      panel.classList.toggle("collapsed");
+      const btn = document.getElementById("demo-collapse");
+      btn.textContent = panel.classList.contains("collapsed") ? "+" : "−";
+    });
+    for (const btn of panel.querySelectorAll(".demo-btn")) {
+      btn.addEventListener("click", () => fireDemo(btn.dataset.demo));
+    }
+  }
+
   // ===== Init =====
 
   document.addEventListener("DOMContentLoaded", () => {
@@ -1081,6 +1182,8 @@
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closeSlideOvers();
     });
+
+    wireDemoPanel();
 
     poll();
     setInterval(poll, POLL_MS);
