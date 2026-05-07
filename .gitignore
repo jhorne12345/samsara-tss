@@ -34,3 +34,6 @@ Thumbs.db
 *.db
 *.db-shm
 *.db-wal
+
+# Private notes — kept on disk, never tracked
+docs/ai-log.md
