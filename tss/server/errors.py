@@ -33,3 +33,12 @@ class JobNotAssignedToAgentError(DispatcherError):
     This is the race-condition case: agent A claimed job J, was marked offline,
     J was reassigned to agent B, and now A's late result is arriving. Reject.
     """
+
+
+class AgentQuarantinedError(DispatcherError):
+    """A demo-killed agent is in its quarantine window and may not re-register.
+
+    Set by ``force_kill_agent`` to keep killed agents off the fleet long enough
+    to see their job get reassigned. Mapped to HTTP 423 Locked so the runner
+    can distinguish this from a normal failure and back off.
+    """

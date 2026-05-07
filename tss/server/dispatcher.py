@@ -47,6 +47,7 @@ from tss.common.models import (
 )
 from tss.server.errors import (
     AgentNotIdleError,
+    AgentQuarantinedError,
     JobNotAssignedToAgentError,
     StaleEpochError,
     UnknownAgentError,
@@ -64,6 +65,14 @@ THROUGHPUT_BUCKETS: int = 12
 EPOCH_HISTORY_CAP: int = 50
 """Per-agent cap on retained past-epoch summaries. Older epochs are dropped
 so a flapping chaos agent doesn't grow the registry without bound."""
+
+KILL_QUARANTINE_S: float = 30.0
+"""How long an operator-killed agent stays barred from re-registering.
+
+The kill demo is meaningful only if the offline state is observable; without
+this, the agent's runner re-registers within one heartbeat cycle and the
+testbed tile flips back to green before the watchdog has even logged the
+reassignment."""
 
 
 class Dispatcher:
@@ -93,6 +102,10 @@ class Dispatcher:
         # ~10 jobs/sec the cap covers ~3.4 minutes, which is plenty for a
         # 12-bucket per-minute series.
         self._completion_times: deque[float] = deque(maxlen=2048)
+        # Agent names currently barred from re-registering (deadline in
+        # monotonic seconds). Populated by ``force_kill_agent`` so demo kills
+        # are observable. Cleared lazily inside ``register``.
+        self._quarantined_names: dict[str, float] = {}
 
     # ----- Registration & heartbeat -----
 
@@ -106,6 +119,15 @@ class Dispatcher:
         async with self._lock:
             now_mono = clock.monotonic()
             now_utc = clock.utcnow()
+            quarantine_until = self._quarantined_names.get(name)
+            if quarantine_until is not None:
+                if now_mono < quarantine_until:
+                    raise AgentQuarantinedError(
+                        f"agent name={name!r} is quarantined for "
+                        f"{quarantine_until - now_mono:.1f}s more"
+                    )
+                # Quarantine expired; let the registration proceed and clean up.
+                del self._quarantined_names[name]
             existing = self.registry.find_by_name(name)
             if existing is not None:
                 # Capture the outgoing epoch's summary before resetting
@@ -514,11 +536,15 @@ class Dispatcher:
 
     # ----- Demo-only operations -----
 
-    async def force_kill_agent(self, agent_id: UUID) -> None:
+    async def force_kill_agent(
+        self, agent_id: UUID, *, quarantine_seconds: float = KILL_QUARANTINE_S,
+    ) -> None:
         """Simulate immediate disconnect for the dashboard's "Kill" button.
 
         Marks the agent OFFLINE, re-queues its current job, and bumps its
-        epoch so any in-flight result is rejected.
+        epoch so any in-flight result is rejected. Also quarantines the
+        agent's *name* for ``quarantine_seconds`` so the runner cannot
+        immediately re-register and cancel the demo.
         """
         async with self._lock:
             agent = self.registry.get(agent_id)
@@ -527,6 +553,7 @@ class Dispatcher:
             now_utc = clock.utcnow()
             self._mark_offline_locked(agent, now_utc, reason="killed_by_operator")
             agent.epoch += 1
+            self._quarantined_names[agent.name] = clock.monotonic() + quarantine_seconds
 
     # ----- Snapshots for the API -----
 
@@ -545,7 +572,7 @@ class Dispatcher:
                 series[buckets - 1 - age_min] += 1
         return series
 
-    async def snapshot_fleet(self, *, max_recent_events: int = 30) -> FleetStatusResponse:
+    async def snapshot_fleet(self, *, max_recent_events: int = 100) -> FleetStatusResponse:
         async with self._lock:
             agents = self.registry.all()
             jobs = self.store.all()

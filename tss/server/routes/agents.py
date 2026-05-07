@@ -15,7 +15,11 @@ from tss.common.models import (
     RegisterResponse,
 )
 from tss.server.dispatcher import Dispatcher
-from tss.server.errors import StaleEpochError, UnknownAgentError
+from tss.server.errors import (
+    AgentQuarantinedError,
+    StaleEpochError,
+    UnknownAgentError,
+)
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
@@ -27,7 +31,12 @@ def _disp(request: Request) -> Dispatcher:
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_200_OK)
 async def register_agent(req: RegisterRequest, request: Request) -> RegisterResponse:
     d = _disp(request)
-    agent = await d.register(req.name, req.capabilities)
+    try:
+        agent = await d.register(req.name, req.capabilities)
+    except AgentQuarantinedError as e:
+        # 423 Locked: the agent name was killed by an operator and is
+        # temporarily barred from re-registering. Runners back off and retry.
+        raise HTTPException(status_code=status.HTTP_423_LOCKED, detail=str(e)) from None
     return RegisterResponse(
         agent_id=agent.id,
         epoch=agent.epoch,

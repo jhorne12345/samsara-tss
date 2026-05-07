@@ -68,18 +68,38 @@ class AgentRunner:
             self._stop_event.set()
 
     async def register(self) -> None:
+        """Register or re-register with the dispatcher.
+
+        Backs off on 423 Locked (the agent name is in a kill quarantine) so
+        operator-initiated kills are observable. Any other non-2xx is
+        re-raised as before.
+        """
         assert self._client is not None
-        r = await self._client.post(
-            "/api/agents/register",
-            json={"name": self.name, "capabilities": self.capabilities},
-        )
-        r.raise_for_status()
-        body = r.json()
-        self.agent_id = UUID(body["agent_id"])
-        self.epoch = body["epoch"]
-        self.heartbeat_interval_s = body["heartbeat_interval_s"]
-        self.poll_interval_s = body["poll_interval_s"]
-        log.info("agent registered name=%s id=%s epoch=%d", self.name, self.agent_id, self.epoch)
+        backoff_s = 1.0
+        while True:
+            r = await self._client.post(
+                "/api/agents/register",
+                json={"name": self.name, "capabilities": self.capabilities},
+            )
+            if r.status_code == 423:
+                log.info(
+                    "agent %s quarantined; sleeping %.1fs before retry",
+                    self.name, backoff_s,
+                )
+                await asyncio.sleep(backoff_s)
+                backoff_s = min(backoff_s * 1.5, 8.0)
+                continue
+            r.raise_for_status()
+            body = r.json()
+            self.agent_id = UUID(body["agent_id"])
+            self.epoch = body["epoch"]
+            self.heartbeat_interval_s = body["heartbeat_interval_s"]
+            self.poll_interval_s = body["poll_interval_s"]
+            log.info(
+                "agent registered name=%s id=%s epoch=%d",
+                self.name, self.agent_id, self.epoch,
+            )
+            return
 
     async def run(self) -> None:
         """Main loop. Runs until stop() is called or an unrecoverable error."""
