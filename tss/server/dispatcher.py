@@ -536,6 +536,13 @@ class Dispatcher:
 
     # ----- Demo-only operations -----
 
+    async def clear_quarantine(self, name: str) -> bool:
+        """Clear an agent name's kill quarantine, if any. Returns True if a
+        quarantine entry was removed. Public so demo routes don't reach into
+        ``_quarantined_names`` directly."""
+        async with self._lock:
+            return self._quarantined_names.pop(name, None) is not None
+
     async def force_kill_agent(
         self, agent_id: UUID, *, quarantine_seconds: float = KILL_QUARANTINE_S,
     ) -> None:

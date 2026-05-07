@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import sqlite3
+from datetime import UTC, datetime
+from uuid import uuid4
 
-import pytest
-
+from tss.common.models import Job, JobEvent, JobStatus
 from tss.server.sqlite_store import SQLiteJobStore
 
 
@@ -41,10 +41,6 @@ def test_init_creates_required_indexes() -> None:
     assert "idx_jobs_submitter" in index_names
 
 
-from datetime import UTC, datetime
-from tss.common.models import Job, JobStatus
-
-
 def _make_job(**overrides: object) -> Job:
     base = {
         "product": "vehicle_gateway",
@@ -72,12 +68,8 @@ def test_add_and_get_round_trips_a_job() -> None:
 
 
 def test_get_returns_none_for_unknown_id() -> None:
-    from uuid import uuid4
     store = SQLiteJobStore(":memory:")
     assert store.get(uuid4()) is None
-
-
-from tss.common.models import JobEvent
 
 
 def test_history_round_trips_with_job() -> None:

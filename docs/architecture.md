@@ -32,31 +32,65 @@ Operators submit firmware test jobs, each tagged with a required product (e.g. `
 
 ---
 
-## High-level picture
+## High-level picture (system diagram)
 
-Three roles, talking to one box.
+This is the block diagram for the presentation: **how the service interacts with agents, how operators submit work, and how the dashboard visualizes fleet status** — all three paths on one canvas.
 
 ```mermaid
 flowchart LR
-    Op["Operator<br/>(CLI or browser dashboard)"]
-    D["TSS Dispatcher<br/>FastAPI · asyncio<br/>localhost:8080"]
-    A1["Test Rig 1<br/>vehicle_gateway"]
-    A2["Test Rig 2<br/>asset_gateway"]
-    A3["Test Rig 3<br/>both"]
+    %% ----- left: clients -----
+    subgraph Clients["Clients"]
+        direction TB
+        CLI["Operator CLI<br/>tss submit-job<br/>tss agents · tss jobs"]
+        Dash["Dashboard (browser)<br/>polls every 1s<br/>engineer + operator views"]
+    end
 
-    Op -->|"submit jobs<br/>view dashboard"| D
-    D -.->|"assignments"| A1
-    D -.->|"assignments"| A2
-    D -.->|"assignments"| A3
-    A1 -->|"register · heartbeat<br/>poll · report result"| D
-    A2 -->|"same"| D
-    A3 -->|"same"| D
+    %% ----- center: dispatcher -----
+    D["TSS Dispatcher<br/>FastAPI · asyncio · localhost:8080<br/>━━━━━━━━━━━━━━━━━━━━<br/>AgentRegistry · JobStore · Watchdog<br/>one asyncio.Lock around all writes"]
+
+    %% ----- right: testbed fleet -----
+    subgraph Fleet["Testbed fleet (HIL rigs)"]
+        direction TB
+        A1["vg-01<br/>vehicle_gateway"]
+        A2["ag-01<br/>asset_gateway"]
+        A3["combo-01<br/>vehicle_gateway + asset_gateway"]
+    end
+
+    %% ----- write paths (operators submit work) -----
+    CLI ==>|"POST /api/jobs<br/>POST /api/agents/{id}/kill"| D
+
+    %% ----- read paths (visualize fleet status) -----
+    Dash -. "GET /api/fleet/status (1Hz)<br/>GET /api/jobs/{id}<br/>GET /api/agents/{id}/history" .-> D
+
+    %% ----- agent contract (poll over HTTP) -----
+    A1 ==>|"register · heartbeat<br/>poll for next job<br/>report result"| D
+    A2 ==>|"same"| D
+    A3 ==>|"same"| D
+
+    %% ----- assignments are responses to polls, never pushes -----
+    D -. "204 No Content (idle)<br/>200 + JobAssignment" .-> A1
+    D -. " " .-> A2
+    D -. " " .-> A3
+
+    classDef client fill:#0a1422,stroke:#5ce0d2,color:#e6edf7;
+    classDef disp fill:#122339,stroke:#5ce0d2,stroke-width:2px,color:#e6edf7;
+    classDef rig fill:#0e1b2e,stroke:#ffc857,color:#e6edf7;
+    class CLI,Dash client;
+    class D disp;
+    class A1,A2,A3 rig;
 ```
 
-Two things to notice:
+Read it in three layers:
 
-- **The dispatcher does not push work to rigs.** Rigs poll the dispatcher every second asking "any work for me?" Polling is more robust than push to flaky HIL networks.
-- **All communication is HTTP.** No WebSockets, no message queue, no shared filesystem.
+- **Solid arrows = writes.** Operators submit jobs and trigger demo actions; agents register, heartbeat, claim, and report. Every one of these crosses the single `asyncio.Lock` at the dispatcher.
+- **Dashed arrows = reads.** The dashboard polls `/api/fleet/status` once per second to repaint; clicking a job or agent fetches detail. The dispatcher's responses to agent polls (the assignment payloads) are also reads from the agent's perspective — the dispatcher *never pushes* work.
+- **Subgraphs = trust zones.** Clients on the left, the single-process dispatcher in the middle, the HIL fleet on the right. Everything between zones is HTTP, no WebSockets, no message queue, no shared filesystem.
+
+Three things to notice:
+
+- **The dispatcher does not push work to rigs.** Rigs poll every second asking "any work for me?" Polling is more robust than push to flaky HIL networks, and it folds liveness into the same channel as work delivery.
+- **The dashboard is just another HTTP client.** It has no privileged backchannel — everything it shows is reachable from `curl /api/fleet/status`. That keeps the trust boundary clean and the visibility surface fully API-first.
+- **One process holds all state.** The dispatcher's lock is the only critical section. Postgres + a stateless dispatcher fleet is the scale-out story (see `scale-evolution.md`); the seam is the `JobStore` Protocol.
 
 ---
 

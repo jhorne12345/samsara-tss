@@ -20,7 +20,6 @@ import signal
 import sys
 from random import choice
 from typing import Any
-
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -122,10 +121,7 @@ async def revive_agent(agent_id: UUID, request: Request) -> None:
     agent = d.registry.get(agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail=f"agent={agent_id} not found")
-    # Clear quarantine under the lock so a concurrent register sees the
-    # cleared state on its next pass.
-    async with d._lock:  # noqa: SLF001 — dispatcher exposes this for demo use
-        d._quarantined_names.pop(agent.name, None)  # noqa: SLF001
+    await d.clear_quarantine(agent.name)
     return None
 
 

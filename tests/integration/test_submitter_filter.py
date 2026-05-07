@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from tss.server.dispatcher import Dispatcher
 
 
