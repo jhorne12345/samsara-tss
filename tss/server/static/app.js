@@ -1171,6 +1171,13 @@
       },
       hint: "watch: claimed → watchdog kills at ~9s (3× declared) → re-queued.",
     },
+    "submit-long": {
+      label: "submit long-running job",
+      payload: {
+        product: "vehicle_gateway", duration_seconds: 30, max_attempts: 3,
+      },
+      hint: "30s job — gives you a stable target to kill mid-run for the requeue demo.",
+    },
   };
 
   async function fireDemo(action) {
@@ -1182,18 +1189,25 @@
       setTimeout(() => { toast.hidden = true; }, 3200);
     };
 
-    if (action === "kill-random") {
+    if (action === "kill-busy") {
       const snap = state.lastSnapshot;
-      const candidates = (snap?.agents || []).filter(a => a.status !== "offline");
+      const agents = snap?.agents || [];
+      // Prefer busy agents so the kill always demonstrates a re-queue.
+      // Fall back to any non-offline so the button is never inert.
+      const busy = agents.filter(a => a.status === "busy");
+      const candidates = busy.length > 0 ? busy : agents.filter(a => a.status !== "offline");
       if (candidates.length === 0) {
         showToast("no live agents to kill", true);
         return;
       }
       const victim = candidates[Math.floor(Math.random() * candidates.length)];
+      const stolenJob = victim.current_job_id ? shortId(victim.current_job_id) : null;
       try {
         const r = await fetch(`/api/agents/${victim.id}/kill`, { method: "POST" });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        showToast(`killed ${victim.name} · watch its job re-queue`);
+        showToast(stolenJob
+          ? `killed ${victim.name} (was running ${stolenJob}) · job is back in queue, watch the next claim`
+          : `killed ${victim.name} (was idle) · no job to re-queue — kill a busy agent to see reassignment`);
         poll();
       } catch (e) { showToast(`kill failed: ${e.message || e}`, true); }
       return;
