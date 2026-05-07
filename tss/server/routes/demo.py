@@ -17,10 +17,18 @@ import shutil
 import sys
 from random import choice
 
+from uuid import UUID
+
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from tss.server.dispatcher import Dispatcher
+
 router = APIRouter(prefix="/api/demo", tags=["demo"])
+
+
+def _disp(request: Request) -> Dispatcher:
+    return request.app.state.dispatcher  # type: ignore[no-any-return]
 
 
 class SpawnAgentRequest(BaseModel):
@@ -88,6 +96,22 @@ async def spawn_agent(req: SpawnAgentRequest, request: Request) -> SpawnAgentRes
     )
     _state_pids(request)[proc.pid] = name
     return SpawnAgentResponse(name=name, pid=proc.pid, capabilities=req.capabilities)
+
+
+@router.post("/agents/{agent_id}/revive", status_code=status.HTTP_204_NO_CONTENT)
+async def revive_agent(agent_id: UUID, request: Request) -> None:
+    """Clear an agent's kill quarantine so the runner's next register
+    attempt succeeds immediately. Used during demos to show the epoch
+    increment when an operator-killed testbed comes back online."""
+    d = _disp(request)
+    agent = d.registry.get(agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"agent={agent_id} not found")
+    # Clear quarantine under the lock so a concurrent register sees the
+    # cleared state on its next pass.
+    async with d._lock:  # noqa: SLF001 — dispatcher exposes this for demo use
+        d._quarantined_names.pop(agent.name, None)  # noqa: SLF001
+    return None
 
 
 @router.post("/agents/spawn-random", response_model=SpawnAgentResponse, status_code=status.HTTP_201_CREATED)

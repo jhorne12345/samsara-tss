@@ -176,12 +176,6 @@ code, pre, .mono { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
   padding: 22px 28px;
   min-height: 0;
 }
-/* Reserve right-edge space for the floating demo panel so it doesn't
-   cover the rightmost column (e.g. the completed list). At narrow
-   viewports we drop the reservation and let the demo panel overlap. */
-@media (min-width: 1200px) {
-  #dash-main { padding-right: 320px; }
-}
 .view {
   display: flex;
   flex-direction: column;
@@ -633,6 +627,22 @@ code, pre, .mono { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 .fleet-status-dot.busy    { background: var(--status-busy);    box-shadow: 0 0 6px rgba(255, 200, 87, 0.55); animation: dot-pulse 1.6s ease-out infinite; }
 .fleet-status-dot.offline { background: var(--status-offline); box-shadow: 0 0 6px rgba(255, 107, 107, 0.55); }
 
+.fleet-tile-revive {
+  margin-top: 4px;
+  background: transparent;
+  border: 1px solid rgba(92, 224, 210, 0.4);
+  color: var(--accent);
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  cursor: pointer;
+  transition: background 130ms;
+}
+.fleet-tile-revive:hover { background: rgba(92, 224, 210, 0.10); }
+
 /* ===== Running / queue / event tables ===== */
 
 .row-grid {
@@ -1083,34 +1093,31 @@ code, pre, .mono { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 .tss-section::-webkit-scrollbar-thumb:hover { background: var(--line-soft); }
 
 /* ===== Demo panel (failure-mode triggers) =====
-   Bottom-right floating card. Lets a presenter trigger each failure mode
-   on demand and watch it propagate through the events feed.            */
+   Horizontal strip rendered inline above the operator view. Hidden on the
+   engineer view (engineers don't need to break their own builds). Each
+   row is a labelled button group; the panel is collapsible to a single
+   line for unobtrusive use. */
 
 .demo-panel {
-  position: fixed;
-  right: 18px;
-  bottom: 48px;
-  width: 280px;
   background: var(--bg-card);
   border: 1px solid rgba(92, 224, 210, 0.30);
   border-radius: 8px;
-  box-shadow: var(--shadow-md);
-  z-index: 50;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 18px;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--text-mute);
+  overflow: hidden;
 }
 .demo-panel.collapsed .demo-panel-body { display: none; }
-.demo-panel.collapsed { width: auto; }
 .demo-panel-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 12px;
+  display: flex; align-items: center; gap: 14px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-card-hi);
-  border-top-left-radius: 8px;
-  border-top-right-radius: 8px;
 }
 .demo-panel.collapsed .demo-panel-head { border-bottom: none; }
+.demo-panel-head .demo-hint { flex: 1; }
 .demo-panel-title {
   font-size: 10px;
   text-transform: uppercase;
@@ -1130,8 +1137,9 @@ code, pre, .mono { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 }
 .demo-collapse:hover { color: var(--text); }
 .demo-panel-body {
-  padding: 10px 12px 12px;
-  display: flex; flex-direction: column; gap: 10px;
+  padding: 10px 14px;
+  display: flex; flex-direction: row; flex-wrap: wrap;
+  gap: 18px; align-items: center;
 }
 .demo-hint {
   margin: 0;
@@ -1140,20 +1148,21 @@ code, pre, .mono { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
   line-height: 1.4;
 }
 .demo-row {
-  display: flex; flex-direction: column; gap: 5px;
+  display: flex; flex-direction: row; align-items: center; gap: 6px;
 }
 .demo-row-label {
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.18em;
   color: var(--text-dim);
+  margin-right: 4px;
 }
 .demo-btn {
   background: var(--bg-deep);
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 3px;
-  padding: 6px 10px;
+  padding: 5px 10px;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   cursor: pointer;

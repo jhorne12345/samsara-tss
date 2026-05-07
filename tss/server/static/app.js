@@ -137,14 +137,17 @@
     const ops = document.getElementById("view-operator");
     const tabE = document.getElementById("role-engineer");
     const tabO = document.getElementById("role-operator");
+    const demoPanel = document.getElementById("demo-panel");
     if (role === "operator") {
       eng.hidden = true; ops.hidden = false;
       tabE.classList.remove("is-active"); tabE.setAttribute("aria-selected", "false");
       tabO.classList.add("is-active");    tabO.setAttribute("aria-selected", "true");
+      if (demoPanel) demoPanel.hidden = false;
     } else {
       eng.hidden = false; ops.hidden = true;
       tabE.classList.add("is-active");    tabE.setAttribute("aria-selected", "true");
       tabO.classList.remove("is-active"); tabO.setAttribute("aria-selected", "false");
+      if (demoPanel) demoPanel.hidden = true;
     }
     if (state.lastSnapshot) renderAll(state.lastSnapshot);
   }
@@ -453,7 +456,17 @@
       agent.status === "idle"    ? "var(--status-live)"    :
       agent.status === "busy"    ? "var(--status-busy)"    :
                                    "var(--status-offline)";
-    return el("button", {
+    const reviveBtn = agent.status === "offline"
+      ? el("button", {
+          class: "fleet-tile-revive",
+          title: "clear quarantine and let this testbed re-register · watch the epoch increment",
+          onclick: (ev) => {
+            ev.stopPropagation();
+            reviveAgent(agent.id, agent.name);
+          },
+        }, "↻ revive")
+      : null;
+    return el("div", {
       class: "fleet-tile",
       onclick: () => openAgentPanel(agent.id),
     }, [
@@ -469,7 +482,25 @@
         el("span", {}, `e${agent.epoch}`),
         el("span", {}, `♥ ${relTime(agent.last_heartbeat_at)}`),
       ]),
+      reviveBtn,
     ]);
+  }
+
+  async function reviveAgent(agentId, agentName) {
+    try {
+      const r = await fetch(`/api/demo/agents/${agentId}/revive`, { method: "POST" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const toast = document.getElementById("demo-toast");
+      if (toast) {
+        toast.textContent = `revived ${agentName} · watch the epoch tick up on next register`;
+        toast.classList.remove("error");
+        toast.hidden = false;
+        setTimeout(() => { toast.hidden = true; }, 3000);
+      }
+      poll();
+    } catch (e) {
+      alert(`revive failed: ${e.message || e}`);
+    }
   }
 
   function queueContext(queue, myJobId) {
