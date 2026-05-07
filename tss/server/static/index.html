@@ -29,8 +29,10 @@
     <span class="hostname-role">DISPATCHER</span>
   </div>
   <div class="topbar-center">
-    <h1>test scheduling service</h1>
-    <p class="subtitle">HIL testbed fleet · live telemetry</p>
+    <div class="role-toggle" role="tablist" aria-label="View">
+      <button id="role-engineer" class="role-tab is-active" role="tab" aria-selected="true">engineer</button>
+      <button id="role-operator" class="role-tab"           role="tab" aria-selected="false">operator</button>
+    </div>
   </div>
   <div class="topbar-right">
     <span class="live-indicator"><span class="live-dot"></span>LIVE</span>
@@ -38,135 +40,40 @@
   </div>
 </header>
 
-<section class="fleet-pulse">
-  <div class="pulse-dots-wrap">
-    <span class="pulse-label">testbeds</span>
-    <div id="pulse-dots" class="pulse-dots"></div>
-  </div>
-  <div class="pulse-stats">
-    <div class="pulse-stat"><span class="pulse-num" id="pulse-queue">0</span><span class="pulse-name">queued</span></div>
-    <div class="pulse-stat"><span class="pulse-num" id="pulse-running">0</span><span class="pulse-name">running</span></div>
-    <div class="pulse-stat"><span class="pulse-num" id="pulse-done">0</span><span class="pulse-name">done</span></div>
-    <div class="pulse-stat pulse-stat-fail"><span class="pulse-num" id="pulse-failed">0</span><span class="pulse-name">failed</span></div>
-    <div class="pulse-stat pulse-stat-offline"><span class="pulse-num" id="pulse-offline">0</span><span class="pulse-name">offline</span></div>
-  </div>
-</section>
-
-<main class="layout-2col">
-  <section class="panel panel-jobs">
-    <header class="panel-header">
-      <h2>jobs</h2>
-      <span class="panel-meta" id="jobs-meta">0 jobs</span>
-    </header>
-    <div class="filter-bar filter-bar-jobs">
-      <label class="mine-toggle">
-        <input id="mine-toggle" type="checkbox" />
-        <span>Mine only</span>
-      </label>
-      <label class="event-filter">
-        <span>status</span>
-        <select id="job-status-filter">
-          <option value="">all</option>
-          <option value="queued">queued</option>
-          <option value="running">running</option>
-          <option value="completed">completed</option>
-          <option value="failed">failed</option>
-        </select>
-      </label>
-    </div>
-    <div class="tss-table-wrap tss-table-wrap-jobs">
-      <table class="tss-table tss-table-jobs">
-        <thead><tr>
-          <th class="col-id sortable"      data-sort="id">id<span class="sort-ind"></span></th>
-          <th class="col-product sortable" data-sort="product">product<span class="sort-ind"></span></th>
-          <th class="col-status sortable"  data-sort="status">status<span class="sort-ind"></span></th>
-          <th class="col-timeline">timeline</th>
-          <th class="col-when sortable"    data-sort="when">when<span class="sort-ind"></span></th>
-        </tr></thead>
-        <tbody id="jobs-list"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="panel panel-events">
-    <header class="panel-header">
-      <h2>events</h2>
-      <span class="panel-meta">audit trail</span>
-    </header>
-    <div class="filter-bar">
-      <label class="event-filter">
-        <span>agent</span>
-        <select id="event-agent-filter">
-          <option value="">all</option>
-        </select>
-      </label>
-    </div>
-    <div class="tss-table-wrap tss-table-wrap-events">
-      <table class="tss-table tss-table-events">
-        <thead><tr>
-          <th class="col-when">time</th>
-          <th class="col-kind">kind</th>
-          <th class="col-id">job</th>
-          <th class="col-agent">agent</th>
-          <th class="col-detail">detail</th>
-        </tr></thead>
-        <tbody id="events-list"></tbody>
-      </table>
-    </div>
-  </section>
+<main id="dash-main">
+  <section id="view-engineer" class="view view-engineer"></section>
+  <section id="view-operator" class="view view-operator" hidden></section>
 </main>
 
 <footer class="footer">
   <span>samsara · test scheduling service · proof-of-concept</span>
 </footer>
 
+<aside id="job-panel" class="slide-over" hidden aria-hidden="true">
+  <div class="slide-over-scrim" data-slide-close></div>
+  <div class="slide-over-card" role="dialog" aria-label="Job detail">
+    <header class="slide-over-head">
+      <div class="slide-over-eyebrow">job</div>
+      <h2 id="job-panel-title" class="slide-over-title mono">—</h2>
+      <button class="slide-over-close" data-slide-close aria-label="Close">×</button>
+    </header>
+    <div id="job-panel-body" class="slide-over-body"></div>
+  </div>
+</aside>
+
+<aside id="agent-panel" class="slide-over" hidden aria-hidden="true">
+  <div class="slide-over-scrim" data-slide-close></div>
+  <div class="slide-over-card" role="dialog" aria-label="Testbed detail">
+    <header class="slide-over-head">
+      <div class="slide-over-eyebrow">testbed</div>
+      <h2 id="agent-panel-title" class="slide-over-title mono">—</h2>
+      <button class="slide-over-close" data-slide-close aria-label="Close">×</button>
+    </header>
+    <div id="agent-panel-body" class="slide-over-body"></div>
+  </div>
+</aside>
+
 <script src="/static/app.js"></script>
-
-<aside id="job-panel" class="job-panel" hidden>
-  <header class="job-panel-header">
-    <h2 id="job-panel-title">Job</h2>
-    <button id="job-panel-close" type="button" aria-label="Close">×</button>
-  </header>
-  <section class="job-panel-meta">
-    <div><strong>id</strong><code id="job-panel-id"></code></div>
-    <div><strong>product</strong><span id="job-panel-product"></span></div>
-    <div><strong>status</strong><span id="job-panel-status"></span></div>
-    <div><strong>submitter</strong><span id="job-panel-submitter"></span></div>
-    <div><strong>attempts</strong><span id="job-panel-attempts"></span></div>
-    <div><strong>agent</strong><span id="job-panel-agent"></span></div>
-  </section>
-  <section class="job-panel-history">
-    <h3>History</h3>
-    <ol id="job-panel-events"></ol>
-  </section>
-  <details class="job-panel-raw">
-    <summary>Raw payload</summary>
-    <pre id="job-panel-raw"></pre>
-  </details>
-</aside>
-
-<aside id="agent-panel" class="job-panel" hidden>
-  <header class="job-panel-header">
-    <h2 id="agent-panel-title">Agent</h2>
-    <button id="agent-panel-close" type="button" aria-label="Close">×</button>
-  </header>
-  <section class="job-panel-meta">
-    <div><strong>id</strong><code id="agent-panel-id"></code></div>
-    <div><strong>capabilities</strong><span id="agent-panel-caps"></span></div>
-    <div><strong>status</strong><span id="agent-panel-status"></span></div>
-    <div><strong>epoch</strong><span id="agent-panel-epoch"></span></div>
-    <div><strong>current job</strong><span id="agent-panel-job"></span></div>
-    <div><strong>registered</strong><span id="agent-panel-registered"></span></div>
-    <div><strong>last heartbeat</strong><span id="agent-panel-heartbeat"></span></div>
-  </section>
-  <section class="agent-panel-actions">
-    <button id="agent-panel-kill" class="kill-button" type="button">kill (demo)</button>
-  </section>
-  <section class="job-panel-history">
-    <h3>Events on this agent</h3>
-    <ol id="agent-panel-events"></ol>
-  </section>
-</aside>
 
 </body>
 </html>

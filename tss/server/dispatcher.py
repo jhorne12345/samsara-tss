@@ -61,6 +61,10 @@ log = logging.getLogger(__name__)
 THROUGHPUT_BUCKETS: int = 12
 """Number of one-minute buckets in the throughput sparkline series."""
 
+EPOCH_HISTORY_CAP: int = 50
+"""Per-agent cap on retained past-epoch summaries. Older epochs are dropped
+so a flapping chaos agent doesn't grow the registry without bound."""
+
 
 class Dispatcher:
     """Owns the registry, store, and the single mutex that serializes all writes."""
@@ -123,6 +127,8 @@ class Dispatcher:
                         jobs_failed=existing.jobs_failed,
                     )
                 )
+                if len(existing.epoch_history) > EPOCH_HISTORY_CAP:
+                    existing.epoch_history = existing.epoch_history[-EPOCH_HISTORY_CAP:]
                 existing.capabilities = list(capabilities)
                 existing.epoch += 1
                 existing.status = AgentStatus.IDLE
