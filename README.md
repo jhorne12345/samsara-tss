@@ -4,7 +4,7 @@ A Test Scheduling Service for Hardware-in-the-Loop (HIL) firmware validation. Ma
 
 Built as the Samsara Automation Team's Build-with-AI assessment.
 
-![dashboard](docs/dashboard-screenshot.png)
+![dashboard](docs/dashboard.png)
 
 ## What it does
 
