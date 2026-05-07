@@ -170,6 +170,14 @@ def submit_job(
         str,
         typer.Option(help="Identifier of the submitter. Defaults to $USER."),
     ] = "",
+    branch: Annotated[
+        str | None,
+        typer.Option(help="Optional git branch this build is for."),
+    ] = None,
+    commit: Annotated[
+        str | None,
+        typer.Option(help="Optional 7-char commit SHA."),
+    ] = None,
     dispatcher: Annotated[
         str, typer.Option(help="Dispatcher base URL.")
     ] = f"http://{DEFAULT_HOST}:{DEFAULT_PORT}",
@@ -177,7 +185,7 @@ def submit_job(
     """Submit a single job to the dispatcher."""
     if not submitter:
         submitter = os.environ.get("USER", "unknown")
-    payload = {
+    payload: dict[str, object] = {
         "product": product,
         "duration_seconds": duration,
         "slow_multiplier": slow,
@@ -186,6 +194,10 @@ def submit_job(
     }
     if crash_at is not None:
         payload["crash_at_pct"] = crash_at
+    if branch is not None:
+        payload["branch"] = branch
+    if commit is not None:
+        payload["commit"] = commit
     r = httpx.post(f"{dispatcher}/api/jobs", json=payload, timeout=5.0)
     r.raise_for_status()
     job_id = r.json()["job_id"]

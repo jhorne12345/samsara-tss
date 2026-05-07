@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   attempt_count        INTEGER NOT NULL DEFAULT 0,
   max_attempts         INTEGER NOT NULL DEFAULT 3,
   submitter            TEXT    NOT NULL,
+  branch               TEXT,
+  commit_sha           TEXT,
   created_at           TEXT    NOT NULL,
   started_at           TEXT,
   completed_at         TEXT,
@@ -74,6 +76,14 @@ class SQLiteJobStore:
         # WAL mode: file-backed DBs benefit; ":memory:" stays on memory journaling.
         self._conn.execute("PRAGMA journal_mode = WAL")
         self._conn.executescript(_SCHEMA)
+        # Backwards-compat: older DBs predate `branch` / `commit_sha`. ALTER
+        # TABLE ADD COLUMN is cheap and idempotent if we swallow the
+        # "duplicate column" error.
+        for col_def in ("branch TEXT", "commit_sha TEXT"):
+            try:
+                self._conn.execute(f"ALTER TABLE jobs ADD COLUMN {col_def}")
+            except sqlite3.OperationalError:
+                pass
         # Track next insertion_order; recover from existing rows on reopen.
         cursor = self._conn.execute(
             "SELECT COALESCE(MAX(insertion_order), 0) FROM jobs"
@@ -111,6 +121,8 @@ class SQLiteJobStore:
             attempt_count=row["attempt_count"],
             max_attempts=row["max_attempts"],
             submitter=row["submitter"],
+            branch=row["branch"] if "branch" in row.keys() else None,
+            commit=row["commit_sha"] if "commit_sha" in row.keys() else None,
             created_at=self._parse_iso(row["created_at"]),
             started_at=self._parse_iso(row["started_at"]),
             completed_at=self._parse_iso(row["completed_at"]),
@@ -128,15 +140,16 @@ class SQLiteJobStore:
                   id, product, status, duration_seconds, expected_exit_code,
                   crash_at_pct, slow_multiplier, assigned_agent_id,
                   assigned_agent_epoch, attempt_count, max_attempts,
-                  submitter, created_at, started_at, completed_at, insertion_order
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                  submitter, branch, commit_sha,
+                  created_at, started_at, completed_at, insertion_order
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     str(job.id), job.product, job.status.value,
                     job.duration_seconds, job.expected_exit_code,
                     job.crash_at_pct, job.slow_multiplier,
                     str(job.assigned_agent_id) if job.assigned_agent_id else None,
                     job.assigned_agent_epoch, job.attempt_count, job.max_attempts,
-                    job.submitter,
+                    job.submitter, job.branch, job.commit,
                     self._iso(job.created_at), self._iso(job.started_at), self._iso(job.completed_at),
                     order,
                 ),
@@ -172,6 +185,7 @@ class SQLiteJobStore:
                    expected_exit_code = ?, crash_at_pct = ?, slow_multiplier = ?,
                    assigned_agent_id = ?, assigned_agent_epoch = ?,
                    attempt_count = ?, max_attempts = ?, submitter = ?,
+                   branch = ?, commit_sha = ?,
                    started_at = ?, completed_at = ?
                    WHERE id = ?""",
                 (
@@ -179,7 +193,7 @@ class SQLiteJobStore:
                     job.expected_exit_code, job.crash_at_pct, job.slow_multiplier,
                     str(job.assigned_agent_id) if job.assigned_agent_id else None,
                     job.assigned_agent_epoch, job.attempt_count, job.max_attempts,
-                    job.submitter,
+                    job.submitter, job.branch, job.commit,
                     self._iso(job.started_at), self._iso(job.completed_at),
                     str(job.id),
                 ),

@@ -56,6 +56,24 @@ class JobEvent(BaseModel):
     detail: str | None = None
 
 
+class EpochSummary(BaseModel):
+    """A snapshot of one (re-)registration window for an agent.
+
+    Pushed into ``Agent.epoch_history`` when the agent re-registers, so
+    the dashboard can visualize each registration as its own band with a
+    reason for ending. Reason examples: ``heartbeat_timeout``,
+    ``killed_by_operator``, ``manual_reregister``.
+    """
+
+    epoch: int
+    started_at: datetime
+    ended_at: datetime | None = None
+    reason_ended: str | None = None
+    jobs_claimed: int = 0
+    jobs_completed: int = 0
+    jobs_failed: int = 0
+
+
 class Agent(BaseModel):
     """Server-side representation of a registered testbed."""
 
@@ -70,6 +88,17 @@ class Agent(BaseModel):
     """Wall-clock time of last heartbeat. For humans."""
     current_job_id: UUID | None = None
     registered_at: datetime
+    epoch_started_at: datetime | None = None
+    """When the *current* epoch began. Resets on each re-registration."""
+
+    # Per-current-epoch counters. Reset on re-registration; the previous
+    # values are captured into ``epoch_history`` before the reset.
+    jobs_claimed: int = 0
+    jobs_completed: int = 0
+    jobs_failed: int = 0
+
+    epoch_history: list[EpochSummary] = Field(default_factory=list)
+    """Past epochs (the current one is *not* duplicated here)."""
 
 
 class Job(BaseModel):
@@ -85,6 +114,10 @@ class Job(BaseModel):
     """For demos: agent should take this many times the declared duration."""
     submitter: str
     """Who submitted this job. Honor system; populated by CLI ($USER) or web ui (localStorage)."""
+    branch: str | None = None
+    """Optional git branch the build is for. Engineer view shows this on the My Build hero."""
+    commit: str | None = None
+    """Optional 7-char commit SHA. Engineer view shows this next to ``branch``."""
 
     status: JobStatus = JobStatus.QUEUED
     assigned_agent_id: UUID | None = None
@@ -149,6 +182,8 @@ class JobSubmitRequest(BaseModel):
     max_attempts: int = Field(default=3, ge=1, le=10)
     submitter: str = "unknown"
     """Free-form identifier. Set by CLI (defaults to $USER) or web (localStorage)."""
+    branch: str | None = None
+    commit: str | None = None
 
 
 class JobSubmitResponse(BaseModel):
@@ -164,6 +199,12 @@ class FleetStats(BaseModel):
     jobs_running: int
     jobs_completed: int
     jobs_failed: int
+    throughput_per_min: list[int] = Field(default_factory=list)
+    """Jobs completed in each of the last N minutes, oldest first.
+
+    The dashboard renders this as a sparkline next to the KPI strip. Length
+    is fixed (12 by default); empty buckets render as zero-height bars.
+    """
 
 
 class FleetStatusResponse(BaseModel):

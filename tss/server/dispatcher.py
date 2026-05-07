@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -36,6 +37,7 @@ from tss.common.constants import (
 from tss.common.models import (
     Agent,
     AgentStatus,
+    EpochSummary,
     FleetStats,
     FleetStatusResponse,
     Job,
@@ -55,6 +57,9 @@ from tss.server.sqlite_store import SQLiteJobStore
 from tss.server.store import JobStore
 
 log = logging.getLogger(__name__)
+
+THROUGHPUT_BUCKETS: int = 12
+"""Number of one-minute buckets in the throughput sparkline series."""
 
 
 class Dispatcher:
@@ -79,6 +84,11 @@ class Dispatcher:
         self.max_overrun_factor = max_overrun_factor
         self.default_max_attempts = default_max_attempts
         self._lock = asyncio.Lock()
+        # Monotonic timestamps of recent job completions (success *or* failure).
+        # Drives the throughput sparkline. Capped to keep memory bounded — at
+        # ~10 jobs/sec the cap covers ~3.4 minutes, which is plenty for a
+        # 12-bucket per-minute series.
+        self._completion_times: deque[float] = deque(maxlen=2048)
 
     # ----- Registration & heartbeat -----
 
@@ -94,11 +104,34 @@ class Dispatcher:
             now_utc = clock.utcnow()
             existing = self.registry.find_by_name(name)
             if existing is not None:
+                # Capture the outgoing epoch's summary before resetting
+                # counters. Reason is inferred from prior status: an agent
+                # that was OFFLINE was reaped by the watchdog (or killed);
+                # an agent that was IDLE/BUSY came back via manual restart.
+                reason = (
+                    "post_offline" if existing.status == AgentStatus.OFFLINE
+                    else "manual_reregister"
+                )
+                existing.epoch_history.append(
+                    EpochSummary(
+                        epoch=existing.epoch,
+                        started_at=existing.epoch_started_at or existing.registered_at,
+                        ended_at=now_utc,
+                        reason_ended=reason,
+                        jobs_claimed=existing.jobs_claimed,
+                        jobs_completed=existing.jobs_completed,
+                        jobs_failed=existing.jobs_failed,
+                    )
+                )
                 existing.capabilities = list(capabilities)
                 existing.epoch += 1
                 existing.status = AgentStatus.IDLE
                 existing.last_heartbeat_mono = now_mono
                 existing.last_heartbeat_at = now_utc
+                existing.epoch_started_at = now_utc
+                existing.jobs_claimed = 0
+                existing.jobs_completed = 0
+                existing.jobs_failed = 0
                 # Clear any stale current_job pointer; the watchdog already
                 # requeued it when this agent went offline.
                 existing.current_job_id = None
@@ -114,6 +147,7 @@ class Dispatcher:
                 last_heartbeat_mono=now_mono,
                 last_heartbeat_at=now_utc,
                 registered_at=now_utc,
+                epoch_started_at=now_utc,
             )
             self.registry.upsert(agent)
             log.info("agent registered id=%s name=%s caps=%s", agent.id, name, capabilities)
@@ -152,6 +186,8 @@ class Dispatcher:
         slow_multiplier: float = 1.0,
         max_attempts: int | None = None,
         submitter: str = "unknown",
+        branch: str | None = None,
+        commit: str | None = None,
     ) -> Job:
         async with self._lock:
             now = clock.utcnow()
@@ -163,13 +199,15 @@ class Dispatcher:
                 slow_multiplier=slow_multiplier,
                 max_attempts=max_attempts or self.default_max_attempts,
                 submitter=submitter,
+                branch=branch,
+                commit=commit,
                 created_at=now,
                 history=[JobEvent(at=now, kind="submitted", detail=f"product={product}")],
             )
             self.store.add(job)
             log.info(
-                "job submitted id=%s product=%s duration=%s submitter=%s",
-                job.id, product, duration_seconds, submitter,
+                "job submitted id=%s product=%s duration=%s submitter=%s branch=%s commit=%s",
+                job.id, product, duration_seconds, submitter, branch, commit,
             )
             return job
 
@@ -213,6 +251,7 @@ class Dispatcher:
             self.store.update(job)   # persist RUNNING transition
             agent.status = AgentStatus.BUSY
             agent.current_job_id = job.id
+            agent.jobs_claimed += 1
             log.info(
                 "job claimed job=%s by agent=%s (epoch=%d) attempt=%d",
                 job.id,
@@ -287,6 +326,8 @@ class Dispatcher:
                         detail=f"exit={exit_code} duration={duration_actual:.1f}s",
                     )
                 )
+                agent.jobs_completed += 1
+                self._completion_times.append(clock.monotonic())
                 log.info("job completed job=%s by agent=%s", job.id, agent.id)
             else:
                 # Job failed at the agent; either retry or give up.
@@ -305,6 +346,8 @@ class Dispatcher:
                             detail=detail,
                         )
                     )
+                    agent.jobs_failed += 1
+                    self._completion_times.append(clock.monotonic())
                     log.warning("job failed job=%s exhausted retries", job.id)
                 else:
                     job.status = JobStatus.QUEUED
@@ -443,6 +486,11 @@ class Dispatcher:
                     detail=f"{detail} (max_attempts={job.max_attempts})",
                 )
             )
+            self._completion_times.append(clock.monotonic())
+            if agent_id is not None:
+                owner = self.registry.get(agent_id)
+                if owner is not None:
+                    owner.jobs_failed += 1
             log.warning("job failed job=%s after %s", job.id, detail)
         else:
             job.status = JobStatus.QUEUED
@@ -475,6 +523,21 @@ class Dispatcher:
             agent.epoch += 1
 
     # ----- Snapshots for the API -----
+
+    def _throughput_series(
+        self, now_mono: float, *, buckets: int = THROUGHPUT_BUCKETS
+    ) -> list[int]:
+        """Return jobs-per-minute counts for the last ``buckets`` minutes.
+
+        Index 0 is the oldest bucket; index ``buckets - 1`` is the current
+        (in-progress) minute. Caller must hold ``self._lock``.
+        """
+        series = [0] * buckets
+        for t in self._completion_times:
+            age_min = int((now_mono - t) // 60)
+            if 0 <= age_min < buckets:
+                series[buckets - 1 - age_min] += 1
+        return series
 
     async def snapshot_fleet(self, *, max_recent_events: int = 30) -> FleetStatusResponse:
         async with self._lock:
@@ -518,6 +581,7 @@ class Dispatcher:
                 jobs_running=len(running),
                 jobs_completed=sum(1 for j in jobs if j.status == JobStatus.COMPLETED),
                 jobs_failed=sum(1 for j in jobs if j.status == JobStatus.FAILED),
+                throughput_per_min=self._throughput_series(clock.monotonic()),
             )
             return FleetStatusResponse(
                 agents=agents,
