@@ -571,21 +571,31 @@
 
   function fleetHero(snap) {
     const stats = snap.stats || {};
+    const total = stats.total_agents || 0;
     const offline = stats.offline || 0;
     const failed = stats.jobs_failed || 0;
+    // Health is a function of the *current* fleet only (offline-fraction).
+    // Cumulative failure counts and historical events are surfaced in the
+    // KPI strip and events feed but don't drive the verdict — otherwise a
+    // single old failure would pin the dashboard on "degraded" forever.
     let health, headline, color, blurb;
-    if (offline === 0 && failed === 0) {
+    if (total === 0) {
+      health = "empty"; headline = "no testbeds registered";
+      color = "var(--text-mute)";
+      blurb = "spawn a testbed from the demo strip or run `tss agent` / `tss chaos`.";
+    } else if (offline === 0) {
       health = "healthy"; headline = "all systems nominal";
       color = "var(--status-live)";
-      blurb = `${stats.total_agents || 0} testbeds online · queue ${stats.queue_depth || 0}`;
-    } else if (offline >= 2 || (snap.recent_events || []).filter(e => e.kind === "failed").length >= 2) {
+      blurb = `${total} testbeds online · queue ${stats.queue_depth || 0}`;
+    } else if (offline * 2 >= total) {
+      // Half or more of the fleet is offline → degraded.
       health = "degraded"; headline = "degraded";
       color = "var(--status-offline)";
-      blurb = `${offline} offline · ${failed} failed total · queue ${stats.queue_depth || 0}`;
+      blurb = `${offline} of ${total} testbeds offline · ${failed} jobs failed lifetime · queue ${stats.queue_depth || 0}`;
     } else {
       health = "watch"; headline = "watch";
       color = "var(--status-busy)";
-      blurb = `${offline} offline · ${stats.busy || 0} busy · queue ${stats.queue_depth || 0}`;
+      blurb = `${offline} of ${total} testbeds offline · ${stats.busy || 0} busy · queue ${stats.queue_depth || 0}`;
     }
 
     const series = (stats.throughput_per_min && stats.throughput_per_min.length)
@@ -1213,6 +1223,31 @@
       return;
     }
 
+    if (action === "chaos-storm") {
+      const btn = document.getElementById("chaos-storm-toggle");
+      const isRunning = btn?.dataset.running === "true";
+      try {
+        const url = isRunning ? "/api/demo/chaos-storm/stop" : "/api/demo/chaos-storm/start";
+        const r = await fetch(url, { method: "POST" });
+        if (!r.ok) {
+          const detail = await r.text();
+          throw new Error(`HTTP ${r.status} · ${detail}`);
+        }
+        const body = await r.json();
+        if (btn) {
+          btn.dataset.running = body.running ? "true" : "false";
+          btn.textContent = body.running ? "calm storm" : "unleash chaos";
+          btn.classList.toggle("danger", !!body.running);
+          btn.classList.toggle("warn", !body.running);
+        }
+        showToast(body.running
+          ? `chaos storm running · 8 mixed-profile agents + continuous job drip · expect silent_death, overrun, crashes, reassigns`
+          : `chaos storm stopped · ${(body.spawned || []).length === 0 ? "spawned agents terminated" : "still cleaning up"}`);
+        poll();
+      } catch (e) { showToast(`storm toggle failed: ${e.message || e}`, true); }
+      return;
+    }
+
     if (action.startsWith("spawn-")) {
       const caps =
         action === "spawn-vg"    ? ["vehicle_gateway"] :
@@ -1260,6 +1295,17 @@
     for (const btn of panel.querySelectorAll(".demo-btn")) {
       btn.addEventListener("click", () => fireDemo(btn.dataset.demo));
     }
+    // Sync the chaos-storm button label with server state in case the
+    // storm survived a page reload.
+    fetch("/api/demo/chaos-storm").then(r => r.ok ? r.json() : null).then(s => {
+      if (!s) return;
+      const btn = document.getElementById("chaos-storm-toggle");
+      if (!btn) return;
+      btn.dataset.running = s.running ? "true" : "false";
+      btn.textContent = s.running ? "calm storm" : "unleash chaos";
+      btn.classList.toggle("danger", !!s.running);
+      btn.classList.toggle("warn", !s.running);
+    }).catch(() => {});
   }
 
   // ===== Init =====

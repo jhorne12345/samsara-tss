@@ -69,6 +69,10 @@
         <button class="demo-btn danger" data-demo="kill-busy"        title="Kill a busy agent (one currently running a job) so you see the re-queue + reassignment immediately. Falls back to any non-offline agent if none are busy.">busy agent &amp; requeue</button>
         <button class="demo-btn"        data-demo="submit-long"      title="Submit a 30s job so there's reliably something running to kill.">submit long job</button>
       </div>
+      <div class="demo-row">
+        <span class="demo-row-label">storm</span>
+        <button class="demo-btn warn"   id="chaos-storm-toggle" data-demo="chaos-storm" title="Spawn 8 mixed-profile agents (stable/flaky/crashy/doomed) and start a continuous job drip. Watches the system handle the full menu of failure modes from the brief.">unleash chaos</button>
+      </div>
       <div id="demo-toast" class="demo-toast" hidden></div>
     </div>
   </aside>
